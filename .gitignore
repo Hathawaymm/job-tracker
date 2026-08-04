@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+
+# 本地数据（SQLite 岗位库，含用户数据）
+server/data/
+
+# 扩展构建产物（可随时 npm run release 重新生成）
+extension/.output/
+extension/.wxt/
+extension/install-this/

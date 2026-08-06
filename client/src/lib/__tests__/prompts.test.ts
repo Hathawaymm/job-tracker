@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
+  buildComposeResumePrompt,
   buildDiagnosePrompt,
   buildGreetingPrompt,
   buildMatchPrompt,
+  buildPickProjectsPrompt,
   buildResumeExtractPrompt,
   buildStarPrompt,
+  experiencesToText,
   resumeToText,
 } from '../prompts'
 import { emptyResume } from '../storage'
@@ -86,5 +89,33 @@ describe('buildResumeExtractPrompt', () => {
     expect(user).toContain('张三 前端 5年')
     expect(user).toContain('experiences')
     expect(user).toContain('JSON')
+  })
+})
+
+describe('experiencesToText', () => {
+  const items = [
+    { id: 1, company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链', 'EDI'] },
+  ]
+  it('序列化出完整条目含 id', () => {
+    const text = experiencesToText(items)
+    expect(text).toContain('[id=1]')
+    expect(text).toContain('EDI 对接')
+    expect(text).toContain('供应链、EDI')
+  })
+})
+
+describe('buildPickProjectsPrompt / buildComposeResumePrompt', () => {
+  const items = [{ id: 1, company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链'] }]
+  it('挑选提示词包含 JD 与经历库', () => {
+    const { system, user } = buildPickProjectsPrompt('需要供应链经验', items, sampleResume())
+    expect(system).toContain('2-4 个项目')
+    expect(user).toContain('需要供应链经验')
+    expect(user).toContain('[id=1]')
+  })
+  it('组装提示词只包含选中项目且含基础信息', () => {
+    const { system, user } = buildComposeResumePrompt('需要供应链经验', [{ id: 1, reason: '匹配' }], items, sampleResume())
+    expect(system).toContain('针对性简历')
+    expect(user).toContain('EDI 对接')
+    expect(user).toContain('张三')
   })
 })

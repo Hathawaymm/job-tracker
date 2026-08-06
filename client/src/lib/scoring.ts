@@ -119,6 +119,25 @@ export interface ExtractedResume {
   education?: Array<{ school?: string; major?: string; degree?: string; period?: string }>
 }
 
+export interface PickProjectsResult {
+  selected: Array<{ id: number; reason: string }>
+  summary: string
+}
+
+export function parsePickProjectsResult(text: string): PickProjectsResult {
+  const obj = extractJson(text)
+  if (obj && typeof obj === 'object') {
+    const o = obj as Record<string, unknown>
+    const selected = Array.isArray(o.selected)
+      ? (o.selected as Array<Record<string, unknown>>)
+          .map((s) => ({ id: Number(s.id), reason: toStr(s.reason) }))
+          .filter((s) => Number.isFinite(s.id))
+      : []
+    return { selected, summary: toStr(o.summary) }
+  }
+  return { selected: [], summary: '' }
+}
+
 /** 从 AI 提取文本解析出结构化的简历字段（容错；无 id 时补 uid） */
 export function parseResumeExtract(text: string): ExtractedResume {
   const obj = extractJson(text)

@@ -137,6 +137,32 @@ ${JSON_RULE}
   return { system, user }
 }
 
+// ---- AI 简历优化（基于诊断结果整份优化）----
+export function buildOptimizePrompt(
+  resume: Resume,
+  diagnose: { highlights: string[]; weaknesses: string[]; suggestions: string[] },
+): { system: string; user: string } {
+  const system =
+    '你是资深简历优化师。基于 HR 诊断结果对整份简历进行优化重写，严格保留所有事实信息（公司名、时间、学历、量化数据），不编造新经历。优化方向：强化 STAR 结构、量化成果、突出与求职意向的匹配度、精简冗余表达。回答必须用简体中文。'
+  const user = `请基于以下诊断建议，优化整份简历并输出结构化 JSON。
+要求：输出 JSON，格式为 {"name": string, "title": string, "city": string, "phone": string, "email": string, "summary": string, "skills": string[], "experiences": [{"company": string, "role": string, "period": string, "highlights": string[]}], "projects": [{"company": string, "name": string, "role": string, "description": string, "points": string[]}], "education": [{"school": string, "major": string, "degree": string, "period": string}]}。
+- 保持原有结构和字段不变，仅优化文字表达；
+- highlights 和 points 用 STAR 法则改写，补充行动与量化结果；
+- summary 精炼为 1-2 句有力概括；
+- 不增删经历条目，不改变公司/学校/时间等事实。
+
+${JSON_RULE}
+
+HR 诊断结果：
+亮点：${diagnose.highlights.join('；') || '无'}
+不足：${diagnose.weaknesses.join('；') || '无'}
+建议：${diagnose.suggestions.join('；') || '无'}
+
+原简历：
+"""${resumeToText(resume)}"""`
+  return { system, user }
+}
+
 // ---- 模拟面试 ----
 export function buildInterviewSystemPrompt(resume: Resume): string {
   return `你是一位严格的面试官，正在对候选人进行真实求职面试。候选人简历如下：
@@ -147,4 +173,97 @@ export function buildInterviewSystemPrompt(resume: Resume): string {
 2. 每次只问 1 个问题；
 3. 候选人回答后，先给一句简短点评（指出亮点或可改进处），再追问下一个问题或切换方向；
 4. 全程用简体中文，语气专业、有追问感，不替候选人作答。`
+}
+
+// ---- 个人经历库：按岗位挑选项目 ----
+
+export interface ExperienceBankItem {
+  id: number
+  company: string
+  name: string
+  role: string
+  period: string
+  description: string
+  points: string[]
+  tags: string[]
+}
+
+/** 把经历库条目序列化为文本，供提示词使用 */
+export function experiencesToText(items: ExperienceBankItem[]): string {
+  return items
+    .map((p, i) => {
+      const lines = [`${i + 1}. [id=${p.id}] ${p.company ? `${p.company}｜` : ''}${p.name}｜${p.role}（${p.period}）`]
+      if (p.tags.length > 0) lines.push(`   标签：${p.tags.join('、')}`)
+      if (p.description) lines.push(`   简介：${p.description}`)
+      for (const pt of p.points) lines.push(`   · ${pt}`)
+      return lines.join('\n')
+    })
+    .join('\n')
+}
+
+/** 从经历库挑选最匹配岗位的项目（返回选中 id 与理由） */
+export function buildPickProjectsPrompt(
+  jobJd: string,
+  items: ExperienceBankItem[],
+  resume: Resume,
+): { system: string; user: string } {
+  const system =
+    '你是一位资深求职顾问，擅长把候选人过往项目经历与目标岗位 JD 做匹配，挑选最能证明胜任力的 2-4 个项目用于生成针对性简历。回答必须用简体中文。'
+  const user = `请从下面的个人经历库中，挑选最匹配该岗位 JD 的 2-4 个项目。
+要求：输出 JSON，格式为 {"selected": [{"id": number, "reason": string}], "summary": string}。
+- selected 里每个项目必须来自经历库中的 id，reason 一句话说明为何选中（对应 JD 哪条要求）；
+- summary 用 1-2 句话概括如何把这些项目组织进简历。
+
+${JSON_RULE}
+
+岗位 JD：
+"""${jobJd}"""
+
+候选人基础信息（技能/求职意向）：
+"""${resumeToText(resume)}"""
+
+个人经历库：
+"""${experiencesToText(items)}"""`
+  return { system, user }
+}
+
+/** 用选中项目 + 基础信息组装一份针对性简历（结构化 Resume） */
+export function buildComposeResumePrompt(
+  jobJd: string,
+  picked: Array<{ id: number; reason: string }>,
+  items: ExperienceBankItem[],
+  resume: Resume,
+): { system: string; user: string } {
+  const system =
+    '你是一位资深简历撰写专家。针对目标岗位 JD，用候选人的基础信息 + 指定的项目经历，组装一份针对性简历。忠于事实，不编造数据，表达按 STAR 法则优化。回答必须用简体中文。'
+  const byId = new Map(items.map((p) => [p.id, p]))
+  const pickedText = picked
+    .map((p) => {
+      const src = byId.get(p.id)
+      if (!src) return ''
+      const lines = [`- ${src.company ? `${src.company}｜` : ''}${src.name}｜${src.role}（${src.period}）`]
+      if (src.description) lines.push(`  简介：${src.description}`)
+      for (const pt of src.points) lines.push(`  · ${pt}`)
+      return lines.join('\n')
+    })
+    .filter(Boolean)
+    .join('\n')
+  const user = `请组装一份针对该岗位的简历。
+要求：输出 JSON，格式为 {"name": string, "title": string, "city": string, "phone": string, "email": string, "summary": string, "skills": string[], "experiences": [{"company": string, "role": string, "period": string, "highlights": string[]}], "projects": [{"company": string, "name": string, "role": string, "description": string, "points": string[]}], "education": [{"school": string, "major": string, "degree": string, "period": string}]}。
+- 基础信息（姓名/电话/邮箱/教育）沿用候选人原值；
+- 项目经历只使用下面指定的项目，按 JD 重要性排序，points 可用 STAR 法则润色但不得改变事实；
+- experiences 保留候选人全部工作经历；
+- summary 结合岗位 JD 与选中项目撰写。
+
+${JSON_RULE}
+
+岗位 JD：
+"""${jobJd}"""
+
+候选人基础信息：
+"""${resumeToText(resume)}"""
+
+指定用于本简历的项目经历：
+"""${pickedText}"""`
+  return { system, user }
 }

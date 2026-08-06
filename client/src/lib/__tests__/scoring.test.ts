@@ -4,6 +4,7 @@ import {
   mergeExtractedResume,
   parseDiagnoseResult,
   parseMatchResult,
+  parsePickProjectsResult,
   parseResumeExtract,
   parseStarResult,
 } from '../scoring'
@@ -91,5 +92,22 @@ describe('parseResumeExtract / mergeExtractedResume', () => {
     expect(merged.experiences[0].id.length).toBeGreaterThan(0)
     expect(merged.experiences[0].company).toBe('A')
     expect(merged.projects).toEqual([])
+  })
+})
+
+describe('parsePickProjectsResult', () => {
+  it('解析选中项目与 summary', () => {
+    const r = parsePickProjectsResult('{"selected":[{"id":3,"reason":"匹配供应链"}],"summary":"概述"}')
+    expect(r.selected).toEqual([{ id: 3, reason: '匹配供应链' }])
+    expect(r.summary).toBe('概述')
+  })
+  it('容忍代码块与尾逗号，过滤非法 id', () => {
+    const r = parsePickProjectsResult('```json\n{"selected":[{"id":1,"reason":"a"},{"id":"abc","reason":"b"}],}\n```')
+    expect(r.selected).toEqual([{ id: 1, reason: 'a' }])
+  })
+  it('非 JSON 返回空结果', () => {
+    const r = parsePickProjectsResult('抱歉，无法处理')
+    expect(r.selected).toEqual([])
+    expect(r.summary).toBe('')
   })
 })

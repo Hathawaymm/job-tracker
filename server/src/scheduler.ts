@@ -1,5 +1,6 @@
 import cron from 'node-cron'
 import { getTask, updateTask } from './db.js'
+import { log } from './logger.js'
 
 export interface WindowDef {
   label: string
@@ -98,10 +99,10 @@ async function tick(run: () => Promise<unknown>): Promise<void> {
       windows: windows.map((w) => (w.label === pending.label ? { ...w, executed: true } : w)),
     }),
   })
-  console.log(`[scheduler] 触发窗口 ${pending.label}（${pending.time}）`)
+  log.info('scheduler', `触发窗口 ${pending.label}（${pending.time}）`)
   try {
     await run()
   } catch (err) {
-    console.error('[scheduler] 窗口抓取失败:', err instanceof Error ? err.message : err)
+    log.error('scheduler', '窗口抓取失败:', err instanceof Error ? err.message : err)
   }
 }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Education, Project, Resume, WorkExperience } from '../../types'
 import { starPolish } from '../../lib/ai'
 import { uid } from '../../lib/id'
+import EditableField from '../../components/EditableField'
 
 interface Props {
   resume: Resume
@@ -15,6 +16,8 @@ const EMPTY_EDU = (): Education => ({ id: uid(), school: '', major: '', degree: 
 
 export default function ResumeForm({ resume, onChange, disabled }: Props) {
   const [polishing, setPolishing] = useState<string | null>(null)
+  const [polishBackup, setPolishBackup] = useState<{ projectId: string; points: string[] } | null>(null)
+
   const set = (patch: Partial<Resume>) => onChange({ ...resume, ...patch })
 
   const updateExp = (id: string, patch: Partial<WorkExperience>) =>
@@ -24,78 +27,93 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
   const updateEdu = (id: string, patch: Partial<Education>) =>
     set({ education: resume.education.map((e) => (e.id === id ? { ...e, ...patch } : e)) })
 
+  // 需求4：新增置顶（unshift）
+  const addExp = () => set({ experiences: [EMPTY_EXP(), ...resume.experiences] })
+  const addProject = () => set({ projects: [EMPTY_PROJECT(), ...resume.projects] })
+  const addEdu = () => set({ education: [EMPTY_EDU(), ...resume.education] })
+
+  // 需求3：润色前保存快照，润色后可回退
   const handleStar = async (p: Project) => {
     if (!p.points.some((x) => x.trim())) {
       alert('该项目还没有要点，请先填写项目要点再一键润色')
       return
     }
     setPolishing(p.id)
+    setPolishBackup({ projectId: p.id, points: [...p.points] })
     try {
       const points = await starPolish(resume, { name: p.name, description: p.description, points: p.points })
       if (points.length > 0) updateProject(p.id, { points })
-      else alert('润色未返回结果，请重试')
+      else {
+        alert('润色未返回结果，请重试')
+        setPolishBackup(null)
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : '润色失败')
+      setPolishBackup(null)
     } finally {
       setPolishing(null)
     }
   }
 
+  const handleRevert = (p: Project) => {
+    if (polishBackup?.projectId === p.id) {
+      updateProject(p.id, { points: polishBackup.points })
+      setPolishBackup(null)
+    }
+  }
+
+  const readonly = disabled ?? false
+
   return (
     <div className="grid" style={{ gap: 16 }}>
+      {/* 基本信息：点击字段即编辑 */}
       <div className="panel">
         <h3>基本信息</h3>
         <div className="row">
           <div className="field">
             <label>姓名</label>
-            <input value={resume.name} disabled={disabled} onChange={(e) => set({ name: e.target.value })} />
+            <EditableField value={resume.name} disabled={readonly} onChange={(v) => set({ name: v })} />
           </div>
           <div className="field">
             <label>求职意向</label>
-            <input value={resume.title} disabled={disabled} onChange={(e) => set({ title: e.target.value })} />
+            <EditableField value={resume.title} disabled={readonly} onChange={(v) => set({ title: v })} />
           </div>
           <div className="field">
             <label>城市</label>
-            <input value={resume.city} disabled={disabled} onChange={(e) => set({ city: e.target.value })} />
+            <EditableField value={resume.city} disabled={readonly} onChange={(v) => set({ city: v })} />
           </div>
         </div>
         <div className="row">
           <div className="field">
             <label>电话</label>
-            <input value={resume.phone} disabled={disabled} onChange={(e) => set({ phone: e.target.value })} />
+            <EditableField value={resume.phone} disabled={readonly} onChange={(v) => set({ phone: v })} />
           </div>
           <div className="field">
             <label>邮箱</label>
-            <input value={resume.email} disabled={disabled} onChange={(e) => set({ email: e.target.value })} />
+            <EditableField value={resume.email} disabled={readonly} onChange={(v) => set({ email: v })} />
           </div>
         </div>
         <div className="field">
           <label>个人简介</label>
-          <textarea
-            value={resume.summary}
-            disabled={disabled}
-            placeholder="用 1-2 句话概括你的定位与核心优势"
-            onChange={(e) => set({ summary: e.target.value })}
-          />
+          <EditableField value={resume.summary} multiline disabled={readonly} placeholder="用 1-2 句话概括你的定位与核心优势" onChange={(v) => set({ summary: v })} />
         </div>
         <div className="field">
           <label>技能（逗号分隔）</label>
-          <textarea
+          <EditableField
             value={resume.skills.join(', ')}
-            disabled={disabled}
-            onChange={(e) =>
-              set({ skills: e.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })
-            }
+            multiline
+            disabled={readonly}
+            placeholder="如：PMP、项目管理、Python"
+            onChange={(v) => set({ skills: v.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })}
           />
         </div>
       </div>
 
+      {/* 工作经历：每条字段点击即编辑 */}
       <div className="panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>工作经历</h3>
-          <button className="ghost small" disabled={disabled} onClick={() => set({ experiences: [...resume.experiences, EMPTY_EXP()] })}>
-            + 添加
-          </button>
+          <button className="ghost small" disabled={readonly} onClick={addExp}>+ 添加</button>
         </div>
         {resume.experiences.length === 0 && <p className="muted small">暂无工作经历，可留空（应届生可只填项目经历）</p>}
         {resume.experiences.map((exp) => (
@@ -103,83 +121,94 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
             <div className="row">
               <div className="field">
                 <label>公司</label>
-                <input value={exp.company} disabled={disabled} onChange={(e) => updateExp(exp.id, { company: e.target.value })} />
+                <EditableField value={exp.company} disabled={readonly} onChange={(v) => updateExp(exp.id, { company: v })} />
               </div>
               <div className="field">
                 <label>职位</label>
-                <input value={exp.role} disabled={disabled} onChange={(e) => updateExp(exp.id, { role: e.target.value })} />
+                <EditableField value={exp.role} disabled={readonly} onChange={(v) => updateExp(exp.id, { role: v })} />
               </div>
               <div className="field">
                 <label>时间</label>
-                <input value={exp.period} disabled={disabled} placeholder="2022.06 - 至今" onChange={(e) => updateExp(exp.id, { period: e.target.value })} />
+                <EditableField value={exp.period} disabled={readonly} placeholder="2022.06 - 至今" onChange={(v) => updateExp(exp.id, { period: v })} />
               </div>
-              <button
-                className="danger small"
-                disabled={disabled}
-                style={{ alignSelf: 'flex-end', marginBottom: 12 }}
-                onClick={() => set({ experiences: resume.experiences.filter((x) => x.id !== exp.id) })}
-              >
-                删除
-              </button>
+              {!readonly && (
+                <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-end', marginBottom: 12 }}>
+                  <button
+                    className="danger small"
+                    onClick={() => { if (confirm('确定删除这条工作经历？')) set({ experiences: resume.experiences.filter((x) => x.id !== exp.id) }) }}
+                  >
+                    删除
+                  </button>
+                </div>
+              )}
             </div>
             <div className="field">
               <label>职责亮点（每行一条，建议含量化结果）</label>
-              <textarea
+              <EditableField
                 value={exp.highlights.join('\n')}
-                disabled={disabled}
-                onChange={(e) => updateExp(exp.id, { highlights: e.target.value.split('\n') })}
+                multiline
+                disabled={readonly}
+                onChange={(v) => updateExp(exp.id, { highlights: v.split('\n') })}
               />
             </div>
           </div>
         ))}
       </div>
 
+      {/* 项目经历：每条字段点击即编辑 + 润色回退 */}
       <div className="panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>项目经历</h3>
-          <button className="ghost small" disabled={disabled} onClick={() => set({ projects: [...resume.projects, EMPTY_PROJECT()] })}>
-            + 添加
-          </button>
+          <button className="ghost small" disabled={readonly} onClick={addProject}>+ 添加</button>
         </div>
         {resume.projects.map((p) => (
           <div key={p.id} className="card" style={{ marginBottom: 12 }}>
             <div className="row">
               <div className="field">
                 <label>公司</label>
-                <input value={p.company} disabled={disabled} placeholder="所属公司（可留空）" onChange={(e) => updateProject(p.id, { company: e.target.value })} />
+                <EditableField value={p.company} disabled={readonly} placeholder="所属公司（可留空）" onChange={(v) => updateProject(p.id, { company: v })} />
               </div>
               <div className="field">
                 <label>项目名称</label>
-                <input value={p.name} disabled={disabled} onChange={(e) => updateProject(p.id, { name: e.target.value })} />
+                <EditableField value={p.name} disabled={readonly} onChange={(v) => updateProject(p.id, { name: v })} />
               </div>
               <div className="field">
                 <label>担任角色</label>
-                <input value={p.role} disabled={disabled} onChange={(e) => updateProject(p.id, { role: e.target.value })} />
+                <EditableField value={p.role} disabled={readonly} onChange={(v) => updateProject(p.id, { role: v })} />
               </div>
-              <button
-                className="danger small"
-                disabled={disabled}
-                style={{ alignSelf: 'flex-end', marginBottom: 12 }}
-                onClick={() => set({ projects: resume.projects.filter((x) => x.id !== p.id) })}
-              >
-                删除
-              </button>
+              {!readonly && (
+                <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-end', marginBottom: 12 }}>
+                  <button
+                    className="danger small"
+                    onClick={() => { if (confirm('确定删除这条项目经历？')) set({ projects: resume.projects.filter((x) => x.id !== p.id) }) }}
+                  >
+                    删除
+                  </button>
+                </div>
+              )}
             </div>
             <div className="field">
               <label>项目简介</label>
-              <textarea value={p.description} disabled={disabled} onChange={(e) => updateProject(p.id, { description: e.target.value })} />
+              <EditableField value={p.description} multiline disabled={readonly} onChange={(v) => updateProject(p.id, { description: v })} />
             </div>
             <div className="field">
               <label>项目要点（每行一条）</label>
-              <textarea
+              <EditableField
                 value={p.points.join('\n')}
-                disabled={disabled || polishing === p.id}
+                multiline
+                disabled={readonly || polishing === p.id}
                 placeholder="一行一条要点，如：负责 XX 模块开发，日活从 1w 提升到 3w"
-                onChange={(e) => updateProject(p.id, { points: e.target.value.split('\n') })}
+                onChange={(v) => updateProject(p.id, { points: v.split('\n') })}
               />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="primary small" disabled={disabled || polishing !== null} onClick={() => void handleStar(p)}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
+              {polishBackup?.projectId === p.id && (
+                <span className="muted small">已保留润色前版本</span>
+              )}
+              {polishBackup?.projectId === p.id && (
+                <button className="ghost small" onClick={() => handleRevert(p)}>↩ 回退</button>
+              )}
+              <button className="primary small" disabled={readonly || polishing !== null} onClick={() => void handleStar(p)}>
                 {polishing === p.id ? <><span className="spinner" /> STAR 润色中…</> : '✨ 一键 STAR 润色'}
               </button>
             </div>
@@ -187,40 +216,41 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
         ))}
       </div>
 
+      {/* 教育经历：每条字段点击即编辑 */}
       <div className="panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>教育经历</h3>
-          <button className="ghost small" disabled={disabled} onClick={() => set({ education: [...resume.education, EMPTY_EDU()] })}>
-            + 添加
-          </button>
+          <button className="ghost small" disabled={readonly} onClick={addEdu}>+ 添加</button>
         </div>
         {resume.education.map((ed) => (
           <div key={ed.id} className="card" style={{ marginBottom: 12 }}>
             <div className="row">
               <div className="field">
                 <label>学校</label>
-                <input value={ed.school} disabled={disabled} onChange={(e) => updateEdu(ed.id, { school: e.target.value })} />
+                <EditableField value={ed.school} disabled={readonly} onChange={(v) => updateEdu(ed.id, { school: v })} />
               </div>
               <div className="field">
                 <label>专业</label>
-                <input value={ed.major} disabled={disabled} onChange={(e) => updateEdu(ed.id, { major: e.target.value })} />
+                <EditableField value={ed.major} disabled={readonly} onChange={(v) => updateEdu(ed.id, { major: v })} />
               </div>
               <div className="field">
                 <label>学历</label>
-                <input value={ed.degree} disabled={disabled} onChange={(e) => updateEdu(ed.id, { degree: e.target.value })} />
+                <EditableField value={ed.degree} disabled={readonly} onChange={(v) => updateEdu(ed.id, { degree: v })} />
               </div>
               <div className="field">
                 <label>时间</label>
-                <input value={ed.period} disabled={disabled} onChange={(e) => updateEdu(ed.id, { period: e.target.value })} />
+                <EditableField value={ed.period} disabled={readonly} onChange={(v) => updateEdu(ed.id, { period: v })} />
               </div>
-              <button
-                className="danger small"
-                disabled={disabled}
-                style={{ alignSelf: 'flex-end', marginBottom: 12 }}
-                onClick={() => set({ education: resume.education.filter((x) => x.id !== ed.id) })}
-              >
-                删除
-              </button>
+              {!readonly && (
+                <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-end', marginBottom: 12 }}>
+                  <button
+                    className="danger small"
+                    onClick={() => { if (confirm('确定删除这条教育经历？')) set({ education: resume.education.filter((x) => x.id !== ed.id) }) }}
+                  >
+                    删除
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ))}

@@ -248,6 +248,52 @@ textarea:focus {
   border-color: var(--primary);
 }
 
+/* ---- 点击即编辑字段：浏览态像印刷的纸，编辑态像可填写的空白 ---- */
+.ef-view {
+  min-height: 30px;
+  padding: 6px 2px;
+  border: none;
+  background: transparent;
+  color: #111827;
+  border-radius: 6px;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.ef-view:hover {
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.ef-empty {
+  color: var(--muted);
+}
+
+.ef-edit {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.45);
+  transition: box-shadow 0.15s ease;
+}
+
+.ef-edit:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px #3b82f6;
+}
+
+textarea.ef-edit {
+  resize: vertical;
+  min-height: 80px;
+}
+
 .grid {
   display: grid;
   gap: 14px;

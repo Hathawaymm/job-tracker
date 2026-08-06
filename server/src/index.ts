@@ -2,9 +2,11 @@ import express from 'express'
 import cors from 'cors'
 import { getCredentials } from './keys.js'
 import { findPoolJobs, getJobById, getTask, getTaskConfig, recentRuns, setDecision, updateTask } from './db.js'
-import { runCrawl, type RunResult } from './crawler.js'
+import { deleteExperience, insertExperience, listExperiences, updateExperience } from './db.js'
+import { fetchJobByUrl, runCrawl, type RunResult } from './crawler.js'
 import { startScheduler } from './scheduler.js'
-import { completeTask, failTask, isExtensionOnline, peekTask, touchHeartbeat } from './ext.js'
+import { completeTask, failTask, getProgress, isExtensionOnline, peekTask, touchHeartbeat } from './ext.js'
+import { log } from './logger.js'
 
 const DEEPSEEK_BASE = 'https://api.deepseek.com'
 const ZHIPU_BASE = 'https://open.bigmodel.cn/api/coding/paas/v4'
@@ -151,7 +153,7 @@ app.post('/api/ai/vision', async (req, res) => {
 // 岗位库：抓取任务 / 待投递池 / 确认忽略 / 日志
 // ---------------------------------------------------------------------------
 
-const CONFIG_KEYS = ['keyword', 'city', 'salary', 'platform', 'count', 'threshold', 'minNew', 'poolDays', 'delayRange', 'resumeText'] as const
+const CONFIG_KEYS = ['keyword', 'city', 'salary', 'salaryUnit', 'platform', 'count', 'threshold', 'minNew', 'poolDays', 'delayRange', 'resumeText'] as const
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n))
@@ -169,6 +171,7 @@ app.get('/api/jobs/tasks', (_req, res) => {
       keyword: config.keyword,
       city: config.city,
       salary: config.salary,
+      salaryUnit: config.salaryUnit,
       platform: config.platform,
       count: config.count,
       threshold: config.threshold,
@@ -195,6 +198,7 @@ app.put('/api/jobs/tasks', (req, res) => {
   config.threshold = clamp(Number(config.threshold) || 65, 0, 100)
   config.minNew = Math.max(0, Number(config.minNew) || 3)
   config.poolDays = clamp(Number(config.poolDays) || 5, 1, 30)
+  if (config.salaryUnit !== 'month' && config.salaryUnit !== 'year') config.salaryUnit = 'month'
   if (!Array.isArray(config.delayRange) || config.delayRange.length !== 2) config.delayRange = [3, 8]
   updateTask({ config: JSON.stringify(config) })
   if (typeof body.enabled === 'boolean') updateTask({ enabled: body.enabled ? 1 : 0 })
@@ -203,6 +207,11 @@ app.put('/api/jobs/tasks', (req, res) => {
 
 app.get('/api/jobs/run/status', (_req, res) => {
   res.json({ running, lastResult })
+})
+
+// 需求5：抓取实时进度
+app.get('/api/jobs/progress', (_req, res) => {
+  res.json({ progress: getProgress(), running })
 })
 
 app.post('/api/jobs/run', (req, res) => {
@@ -215,7 +224,7 @@ app.post('/api/jobs/run', (req, res) => {
   void (async () => {
     running = true
     try {
-      lastResult = await runCrawl(resumeText)
+      lastResult = await runCrawl('manual', resumeText)
     } catch (err) {
       lastResult = {
         fetched: 0,
@@ -259,6 +268,97 @@ app.get('/api/jobs/logs', (_req, res) => {
   res.json({ runs: recentRuns(50) })
 })
 
+// 手动新增：按招聘链接抓取岗位并入库（绕过列表反爬，需扩展在线）
+app.post('/api/jobs/manual', async (req, res) => {
+  const body = (req.body ?? {}) as { url?: unknown; platform?: unknown }
+  const url = typeof body.url === 'string' ? body.url : ''
+  const platform = typeof body.platform === 'string' ? body.platform : 'manual'
+  if (!url.trim()) {
+    res.status(400).json({ error: '请填写招聘链接' })
+    return
+  }
+  try {
+    const job = await fetchJobByUrl(url, platform)
+    res.json({ ok: true, job })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    res.status(500).json({ error: msg })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 个人经历库：跨端持久 CRUD
+// ---------------------------------------------------------------------------
+
+interface ExperienceBody {
+  company?: unknown
+  name?: unknown
+  role?: unknown
+  period?: unknown
+  description?: unknown
+  points?: unknown
+  tags?: unknown
+}
+
+function parseExperienceBody(body: ExperienceBody): { name: string; fields: Omit<ExperienceItemInput, 'name'> } | null {
+  if (typeof body.name !== 'string' || !body.name.trim()) return null
+  return {
+    name: body.name.trim(),
+    fields: {
+      company: typeof body.company === 'string' ? body.company : '',
+      role: typeof body.role === 'string' ? body.role : '',
+      period: typeof body.period === 'string' ? body.period : '',
+      description: typeof body.description === 'string' ? body.description : '',
+      points: Array.isArray(body.points) ? (body.points as string[]) : [],
+      tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
+    },
+  }
+}
+
+interface ExperienceItemInput {
+  company: string
+  name: string
+  role: string
+  period: string
+  description: string
+  points: string[]
+  tags: string[]
+}
+
+app.get('/api/experiences', (_req, res) => {
+  res.json({ items: listExperiences() })
+})
+
+app.post('/api/experiences', (req, res) => {
+  const parsed = parseExperienceBody((req.body ?? {}) as ExperienceBody)
+  if (!parsed) {
+    res.status(400).json({ error: 'name 不能为空' })
+    return
+  }
+  const item = insertExperience({ ...parsed.fields, name: parsed.name })
+  res.json({ ok: true, item })
+})
+
+app.put('/api/experiences/:id', (req, res) => {
+  const id = Number(req.params.id)
+  const parsed = parseExperienceBody((req.body ?? {}) as ExperienceBody)
+  if (!parsed) {
+    res.status(400).json({ error: 'name 不能为空' })
+    return
+  }
+  const item = updateExperience(id, { ...parsed.fields, name: parsed.name })
+  if (!item) {
+    res.status(404).json({ error: '经历不存在' })
+    return
+  }
+  res.json({ ok: true, item })
+})
+
+app.delete('/api/experiences/:id', (req, res) => {
+  const ok = deleteExperience(Number(req.params.id))
+  res.json({ ok })
+})
+
 // ---------------------------------------------------------------------------
 // Chrome 扩展抓取通道：任务领取 / 结果回传 / 在线状态
 // ---------------------------------------------------------------------------
@@ -277,16 +377,29 @@ app.post('/api/ext/result', (req, res) => {
   const body = (req.body ?? {}) as { taskId?: unknown; result?: unknown; error?: unknown }
   const taskId = typeof body.taskId === 'string' ? body.taskId : ''
   if (typeof body.error === 'string' && body.error) {
+    log.error('ext', `任务回传失败 taskId=${taskId} error=${body.error}`)
     failTask(taskId, body.error)
   } else {
+    const resultShape = Array.isArray(body.result)
+      ? `array[${body.result.length}]`
+      : typeof body.result === 'object' && body.result !== null
+        ? `object{${Object.keys(body.result as object).join(',')}}`
+        : typeof body.result
+    log.info('ext', `任务回传成功 taskId=${taskId} shape=${resultShape}`)
     completeTask(taskId, body.result)
   }
   res.json({ ok: true })
 })
 
+// 全局错误兜底：未捕获异常留痕，避免问题静默丢失
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  log.error('api', '未捕获异常:', err instanceof Error ? err.stack ?? err.message : err)
+  res.status(500).json({ error: '服务内部错误' })
+})
+
 const PORT = Number(process.env.PORT ?? 3001)
 app.listen(PORT, () => {
-  console.log(`[job-tracker] AI 代理已启动: http://localhost:${PORT}`)
-  startScheduler(() => runCrawl())
-  console.log('[job-tracker] 岗位抓取调度已启动（每日 3 窗口：08-09 / 12-14 / 18-19）')
+  log.info('job-tracker', `AI 代理已启动: http://localhost:${PORT}`)
+  startScheduler(() => runCrawl('scheduled'))
+  log.info('job-tracker', '岗位抓取调度已启动（每日 3 窗口：08-09 / 12-14 / 18-19）')
 })

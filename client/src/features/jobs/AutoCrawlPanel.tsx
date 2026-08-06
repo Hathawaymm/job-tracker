@@ -1,16 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  getCrawlProgress,
   getExtStatus,
   getRunStatus,
   getTasks,
   triggerCrawl,
   updateTasks,
+  type CrawlProgress,
   type TaskInfo,
 } from '../../lib/jobsApi'
 import { resumeToText } from '../../lib/prompts'
 import { ResumePicker, useResumeSelection } from '../../components/ResumePicker'
 
 const WINDOW_LABEL: Record<string, string> = { morning: '上午', noon: '中午', evening: '晚上' }
+const PLATFORM_LABEL: Record<string, string> = { boss: 'BOSS直聘', liepin: '猎聘' }
+const PLATFORM_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'liepin', label: '猎聘' },
+  { value: 'boss', label: 'BOSS直聘' },
+]
 
 interface Props {
   onPoolChanged: () => void
@@ -24,10 +31,14 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
   const [keyword, setKeyword] = useState('')
   const [city, setCity] = useState('')
   const [salary, setSalary] = useState('')
+  const [salaryUnit, setSalaryUnit] = useState<'month' | 'year'>('month')
+  const [platform, setPlatform] = useState('liepin')
   const [count, setCount] = useState(50)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
+  const [progress, setProgress] = useState<CrawlProgress | null>(null)
+  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -36,6 +47,8 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
       setKeyword(t.config.keyword)
       setCity(t.config.city)
       setSalary(t.config.salary)
+      setSalaryUnit(t.config.salaryUnit ?? 'month')
+      setPlatform(t.config.platform)
       setCount(t.config.count)
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载任务配置失败')
@@ -63,7 +76,7 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
     setErr('')
     setMsg('')
     try {
-      await updateTasks({ keyword, city, salary, count, resumeText })
+      await updateTasks({ keyword, city, salary, salaryUnit, platform, count, resumeText })
       setMsg('搜索设置已保存')
       void loadTasks()
     } catch (e) {
@@ -85,11 +98,19 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
     setMsg('')
     void refreshExt()
     setBusy(true)
+    setProgress(null)
     try {
       await triggerCrawl(resumeText)
-      for (let i = 0; i < 120; i++) {
-        await new Promise((r) => setTimeout(r, 2000))
-        const st = await getRunStatus()
+      // 需求5：抓取期间轮询实时进度
+      progressTimer.current = setInterval(() => {
+        void getCrawlProgress()
+          .then((p) => setProgress(p.progress))
+          .catch(() => {})
+      }, 1200)
+
+      for (let i = 0; i < 150; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        const [st] = await Promise.all([getRunStatus(), getCrawlProgress().catch(() => null)])
         if (!st.running) {
           const r = st.lastResult
           if (r?.error) setErr(r.error)
@@ -99,20 +120,23 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
             )
           break
         }
-        if (i % 10 === 0) setMsg('抓取进行中…（每批间隔 3-8 秒模拟真人节奏）')
       }
       void loadTasks()
       onPoolChanged()
     } catch (e) {
       setErr(e instanceof Error ? e.message : '抓取失败')
     } finally {
+      if (progressTimer.current) {
+        clearInterval(progressTimer.current)
+        progressTimer.current = null
+      }
       setBusy(false)
     }
   }
 
   return (
     <div className="panel">
-      <h3>🤖 自动抓取（BOSS直聘）</h3>
+      <h3>🤖 自动抓取（{PLATFORM_LABEL[platform] ?? platform}）</h3>
       <div className="info-box">
         每天 <b>3 个时段</b>（上午 8-9 点 / 中午 12-14 点 / 晚上 18-19 点）各在窗口内随机时刻抓取一次，每次最多 50 条 → AI 匹配（结合简历）→ <b>匹配度 ≥65%</b> 进入下方待投递池。新增 &lt;3 条时自动跳过后续时段，次日恢复。
       </div>
@@ -137,7 +161,7 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
 
       {extOnline === false && (
         <div className="warn-box">
-          <b>抓取扩展未在线：</b>抓取依赖你在 Chrome 里安装「AI 求职助手抓取」扩展（复用你的 BOSS 登录态）。
+          <b>抓取扩展未在线：</b>抓取依赖你在 Chrome 里安装「AI 求职助手抓取」扩展（复用你的猎聘/BOSS 登录态）。
           <br />
           安装步骤：① Chrome 地址栏打开 <code>chrome://extensions</code> → ② 右上角开启「开发者模式」 → ③ 点「加载已解压的扩展程序」 → ④ 选择本项目的 <code>extension/install-this</code> 目录。
           <br />
@@ -146,6 +170,16 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
       )}
 
       <div className="row">
+        <div className="field">
+          <label>抓取平台 *</label>
+          <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
+            {PLATFORM_OPTIONS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="field">
           <label>岗位名称 *</label>
           <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="如：前端开发工程师" />
@@ -156,7 +190,22 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
         </div>
         <div className="field">
           <label>薪资范围</label>
-          <input value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="如：20k-30k" />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              value={salary}
+              onChange={(e) => setSalary(e.target.value)}
+              placeholder={salaryUnit === 'month' ? '如：20k-30k' : '如：30-50万'}
+              style={{ flex: 1 }}
+            />
+            <select
+              value={salaryUnit}
+              onChange={(e) => setSalaryUnit(e.target.value as 'month' | 'year')}
+              style={{ width: 'auto' }}
+            >
+              <option value="month">月薪 k</option>
+              <option value="year">年薪 万</option>
+            </select>
+          </div>
         </div>
         <div className="field">
           <label>单次抓取上限</label>
@@ -185,6 +234,44 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
           <span className="muted small">⚠ 尚未同步简历到服务器（保存设置时会带上简历）</span>
         )}
       </div>
+
+      {/* 需求5：抓取实时进度 */}
+      {busy && progress && (
+        <div className="info-box" style={{ marginTop: 10 }}>
+          {progress.phase === 'crawling' && (
+            <span>
+              <span className="spinner" /> 正在从 {PLATFORM_LABEL[progress.platform] ?? progress.platform} 抓取岗位，预计还需 1-2 分钟 ⏳
+            </span>
+          )}
+          {progress.phase === 'scoring' && (
+            <span>
+              已抓取 {progress.fetched}/{progress.total} 条，已匹配 {progress.scored}/{progress.total} 条，
+              符合条件 {progress.matched} 条 {progress.matched > 0 ? '✅' : '❤️'}
+            </span>
+          )}
+          {progress.phase === 'done' && <span>✅ 抓取完成</span>}
+          {progress.fetched > 0 && progress.total > 0 && (
+            <div
+              style={{
+                height: 6,
+                background: '#e5e7eb',
+                borderRadius: 4,
+                marginTop: 8,
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${Math.min(100, Math.round((progress.fetched / progress.total) * 100))}%`,
+                  background: 'var(--green)',
+                  transition: 'width 0.5s',
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {err && <div className="error-box" style={{ marginTop: 10 }}>{err}</div>}
       {msg && <div className="info-box" style={{ marginTop: 10 }}>{msg}</div>}

@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "docx": "^9.7.1",
     "html2canvas": "^1.4.1",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.2.108",

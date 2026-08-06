@@ -3,14 +3,16 @@ import { AppProvider, useApp } from './hooks/useAppState'
 import { healthCheck } from './lib/ai'
 import { downloadJson, parseImportJson, saveResumes } from './lib/storage'
 import ResumePage from './features/resume/ResumePage'
+import ExperienceBankPage from './features/resume/ExperienceBankPage'
 import JobsPage from './features/jobs/JobsPage'
 import GreetingPage from './features/greeting/GreetingPage'
 import PipelinePage from './features/pipeline/PipelinePage'
 import InterviewPage from './features/interview/InterviewPage'
 
-type Tab = 'resume' | 'jobs' | 'greeting' | 'pipeline' | 'interview'
+type Tab = 'resume' | 'bank' | 'jobs' | 'greeting' | 'pipeline' | 'interview'
 
 const TABS: Array<{ key: Tab; label: string }> = [
+  { key: 'bank', label: '经历库' },
   { key: 'resume', label: '简历' },
   { key: 'jobs', label: '岗位库' },
   { key: 'greeting', label: '招呼语' },
@@ -20,7 +22,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 function Shell() {
   const { state, importData } = useApp()
-  const [tab, setTab] = useState<Tab>('resume')
+  const [tab, setTab] = useState<Tab>('bank')
   const [health, setHealth] = useState<{ deepseek: boolean; vision: boolean } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -88,6 +90,7 @@ function Shell() {
       </nav>
       <main>
         {tab === 'resume' && <ResumePage />}
+        {tab === 'bank' && <ExperienceBankPage />}
         {tab === 'jobs' && <JobsPage />}
         {tab === 'greeting' && <GreetingPage />}
         {tab === 'pipeline' && <PipelinePage />}

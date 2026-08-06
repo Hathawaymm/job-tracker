@@ -1,20 +1,26 @@
 import type { Resume, Job } from '../types'
 import {
+  buildComposeResumePrompt,
   buildDiagnosePrompt,
   buildGreetingPrompt,
   buildInterviewSystemPrompt,
   buildMatchPrompt,
+  buildOptimizePrompt,
+  buildPickProjectsPrompt,
   buildResumeExtractPrompt,
   buildStarPrompt,
+  type ExperienceBankItem,
 } from './prompts'
 import {
   parseDiagnoseResult,
   parseMatchResult,
+  parsePickProjectsResult,
   parseResumeExtract,
   parseStarResult,
   type DiagnoseResult,
   type ExtractedResume,
   type MatchPayload,
+  type PickProjectsResult,
 } from './scoring'
 
 export interface ChatOptions {
@@ -110,6 +116,22 @@ export async function diagnoseResume(resume: Resume): Promise<DiagnoseResult> {
   return parseDiagnoseResult(text)
 }
 
+/** 基于诊断结果整份优化简历，返回优化后的结构化字段 */
+export async function optimizeResume(
+  resume: Resume,
+  diagnose: DiagnoseResult,
+): Promise<ExtractedResume> {
+  const { system, user } = buildOptimizePrompt(resume, diagnose)
+  const text = await chat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { thinking: 'on', effort: 'high', maxTokens: 4000 },
+  )
+  return parseResumeExtract(text)
+}
+
 /** STAR 润色：项目要点改写 */
 export async function starPolish(
   resume: Resume,
@@ -188,7 +210,8 @@ export async function resumeFromText(sourceText: string): Promise<ExtractedResum
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { thinking: 'on', effort: 'high', maxTokens: 3000 },
+    // 结构提取是机械转换，无需深度推理；thinking off 避免推理挤占输出预算导致空 content
+    { thinking: 'off', maxTokens: 8000 },
   )
   return parseResumeExtract(text)
 }
@@ -200,6 +223,41 @@ export async function resumeFromImage(dataUri: string): Promise<ExtractedResume>
     '请完整、准确地逐字提取这份简历图片中的所有文字，保留原有分段与要点结构，不要遗漏任何项目、工作、教育经历和数字。',
   )
   return resumeFromText(desc)
+}
+
+/** 从经历库挑选最匹配岗位的项目 */
+export async function pickProjectsForJob(
+  jobJd: string,
+  items: ExperienceBankItem[],
+  resume: Resume,
+): Promise<PickProjectsResult> {
+  const { system, user } = buildPickProjectsPrompt(jobJd, items, resume)
+  const text = await chat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { thinking: 'on', effort: 'high', maxTokens: 1500 },
+  )
+  return parsePickProjectsResult(text)
+}
+
+/** 用选中项目组装针对性简历，返回结构化字段 */
+export async function composeResumeForJob(
+  jobJd: string,
+  picked: Array<{ id: number; reason: string }>,
+  items: ExperienceBankItem[],
+  resume: Resume,
+): Promise<ExtractedResume> {
+  const { system, user } = buildComposeResumePrompt(jobJd, picked, items, resume)
+  const text = await chat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { thinking: 'on', effort: 'high', maxTokens: 4000 },
+  )
+  return parseResumeExtract(text)
 }
 
 /** 服务健康检查：确认代理与 key 状态 */

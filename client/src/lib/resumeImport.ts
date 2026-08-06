@@ -4,7 +4,7 @@ import type { ExtractedResume } from './scoring'
 import { resumeFromText, visionDescribe } from './ai'
 import { fileToDataUri } from './file'
 
-export type ResumeFileType = 'image' | 'pdf' | 'docx' | 'unsupported'
+export type ResumeFileType = 'image' | 'pdf' | 'docx' | 'markdown' | 'unsupported'
 
 /** 按文件类型（MIME 优先，后缀兜底）判断解析策略 */
 export function detectResumeFileType(file: File): ResumeFileType {
@@ -12,6 +12,7 @@ export function detectResumeFileType(file: File): ResumeFileType {
   if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/.test(name)) return 'image'
   if (file.type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf'
   if (file.type.includes('wordprocessingml') || name.endsWith('.docx')) return 'docx'
+  if (file.type === 'text/markdown' || name.endsWith('.md') || name.endsWith('.markdown')) return 'markdown'
   return 'unsupported'
 }
 
@@ -84,8 +85,11 @@ export async function importResumeFile(file: File): Promise<ExtractedResume> {
     case 'docx':
       sourceText = await extractDocxText(file)
       break
+    case 'markdown':
+      sourceText = await file.text()
+      break
     default:
-      throw new Error('暂不支持该格式，请使用 PDF、Word（.docx）或图片格式的简历')
+      throw new Error('暂不支持该格式，请使用 PDF、Word（.docx）、Markdown 或图片格式的简历')
   }
   return resumeFromText(sourceText)
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../hooks/useAppState'
-import { diagnoseResume } from '../../lib/ai'
+import { diagnoseResume, optimizeResume } from '../../lib/ai'
 import { importResumeFile, detectResumeFileType } from '../../lib/resumeImport'
 import { mergeExtractedResume, type DiagnoseResult } from '../../lib/scoring'
 import { emptyResume, saveResumes } from '../../lib/storage'
@@ -11,6 +11,7 @@ import ResumePreview from './ResumePreview'
 const BUSY_LABEL: Record<string, string> = {
   import_pdf: '解析 PDF…',
   import_docx: '提取 Word…',
+  import_markdown: '解析 Markdown…',
   import_image: '识图导入…',
 }
 
@@ -24,6 +25,7 @@ export default function ResumePage() {
   const [done, setDone] = useState('')
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [preview, setPreview] = useState<ResumeVersion | null>(null)
+  const [optimizing, setOptimizing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const toastTimer = useRef<number | null>(null)
 
@@ -61,7 +63,7 @@ export default function ResumePage() {
 
   const handleImport = async (file: File) => {
     const type = detectResumeFileType(file)
-    setBusy(type === 'pdf' ? 'import_pdf' : type === 'docx' ? 'import_docx' : 'import_image')
+    setBusy(type === 'pdf' ? 'import_pdf' : type === 'docx' ? 'import_docx' : type === 'markdown' ? 'import_markdown' : 'import_image')
     setError('')
     setDone('')
     try {
@@ -119,6 +121,27 @@ export default function ResumePage() {
     }
   }
 
+  // 需求1：基于诊断结果整份优化，生成新版本「AI-原名」
+  const handleOptimize = async () => {
+    if (!current || !diagnose) return
+    setOptimizing(true)
+    setError('')
+    setDone('')
+    try {
+      const ext = await optimizeResume(current.resume, diagnose)
+      const optimized = mergeExtractedResume(current.resume, ext)
+      const newName = `AI-${current.name}`
+      const id = addResumeVersion(newName, optimized)
+      setCurrentId(id)
+      setDiagnose(null)
+      showToast('ok', `已生成优化版本「${newName}」，可编辑后保存；原版本已保留`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '简历优化失败')
+    } finally {
+      setOptimizing(false)
+    }
+  }
+
   return (
     <div>
       {toast && <div className={`toast ${toast.type}`}>{toast.text}</div>}
@@ -170,7 +193,7 @@ export default function ResumePage() {
         <input
           ref={fileRef}
           type="file"
-          accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,image/*"
+          accept=".pdf,.docx,.md,.markdown,.png,.jpg,.jpeg,.webp,image/*"
           style={{ display: 'none' }}
           onChange={(e) => {
             const f = e.target.files?.[0]
@@ -212,6 +235,18 @@ export default function ResumePage() {
                     ))}
                   </ul>
                 </div>
+              </div>
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button className="primary" disabled={optimizing} onClick={() => void handleOptimize()}>
+                  {optimizing ? (
+                    <>
+                      <span className="spinner" /> 优化生成中…
+                    </>
+                  ) : (
+                    '✨ 基于诊断生成优化简历'
+                  )}
+                </button>
+                <span className="muted small">将生成新版本「AI-{current.name}」并自动切换编辑，原版本保留可对比</span>
               </div>
             </div>
           )}

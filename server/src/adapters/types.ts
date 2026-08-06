@@ -4,6 +4,8 @@ export interface SearchQuery {
   salary: string
   count: number
   delayRange: [number, number]
+  platform?: 'boss' | 'liepin'
+  salaryUnit?: 'month' | 'year'
 }
 
 export interface RawJob {

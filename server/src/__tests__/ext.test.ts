@@ -24,7 +24,7 @@ describe('ext 任务队列', () => {
     expect(task?.query?.keyword).toBe('前端')
 
     const fakeJobs = [{ title: '前端', company: 'A', salary: '20K', city: '上海', url: 'https://x.com/job/1', externalId: '1', jd: '' }]
-    ext.completeTask(task!.id, fakeJobs)
+    ext.completeTask(task!.taskId, fakeJobs)
     await expect(promise).resolves.toEqual(fakeJobs)
     expect(ext.peekTask()).toBeNull()
   })
@@ -33,7 +33,7 @@ describe('ext 任务队列', () => {
     const ext = await freshModule()
     const promise = ext.enqueueSearch({ keyword: 'a', city: '', salary: '', count: 5, delayRange: [3, 8] as [number, number] })
     const task = ext.peekTask()
-    ext.failTask(task!.id, '抓取失败')
+    ext.failTask(task!.taskId, '抓取失败')
     await expect(promise).rejects.toThrow('抓取失败')
   })
 
@@ -49,7 +49,7 @@ describe('ext 任务队列', () => {
     const task = ext.peekTask()
     expect(task?.type).toBe('fetchJd')
     expect(task?.url).toBe('https://x.com/job/1')
-    ext.completeTask(task!.id, '完整 JD 文本')
+    ext.completeTask(task!.taskId, '完整 JD 文本')
     await expect(promise).resolves.toBe('完整 JD 文本')
   })
 })

@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useApp } from '../../hooks/useAppState'
-import { matchJob } from '../../lib/ai'
+import { composeResumeForJob, matchJob, pickProjectsForJob } from '../../lib/ai'
 import { findDuplicateJob } from '../../lib/dedupe'
 import { makeJob } from '../../lib/storage'
 import { nowIso } from '../../lib/id'
-import { fitLevelFromScore, setJobDecision, type PoolJob } from '../../lib/jobsApi'
+import { mergeExtractedResume } from '../../lib/scoring'
+import { fitLevelFromScore, getExperiences, manualFetchJob, setJobDecision, type PoolJob } from '../../lib/jobsApi'
 import type { Job } from '../../types'
 import { ResumePicker, useResumeSelection } from '../../components/ResumePicker'
 import JobEditor from './JobEditor'
@@ -27,7 +28,7 @@ function fitClass(level: string): string {
 }
 
 export default function JobsPage() {
-  const { state, addJob, updateJob, deleteJob, addLog } = useApp()
+  const { state, addJob, updateJob, deleteJob, addLog, addResumeVersion } = useApp()
   const jobs = state.jobs
   const sel = useResumeSelection('jobs')
   const resume = sel.version?.resume ?? null
@@ -38,6 +39,9 @@ export default function JobsPage() {
   const [filteringAll, setFilteringAll] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
+  const [manualUrl, setManualUrl] = useState('')
+  const [manualBusy, setManualBusy] = useState(false)
+  const [composingId, setComposingId] = useState<string | null>(null)
   const [poolRefresh, setPoolRefresh] = useState(0)
 
   /** 待投递池确认：转入手动岗位库（进话术/投递流程），并写服务器去重 */
@@ -49,7 +53,7 @@ export default function JobsPage() {
       title: poolJob.title,
       city: poolJob.city,
       salary: poolJob.salary,
-      channel: poolJob.platform === 'boss' ? 'BOSS直聘' : poolJob.platform,
+      channel: poolJob.platform === 'boss' ? 'BOSS直聘' : poolJob.platform === 'liepin' ? '猎聘' : poolJob.platform,
       url: poolJob.url,
       jdText: poolJob.jd || poolJob.title,
       source: 'manual',
@@ -146,10 +150,90 @@ export default function JobsPage() {
     setDone('批量筛选完成')
   }
 
+  /** 针对岗位生成针对性简历：经历库挑选项目 → AI 组装 → 新简历版本 */
+  const handleComposeResume = async (job: Job) => {
+    setError('')
+    setDone('')
+    if (!resume) {
+      setError('没有可用的简历版本作为基础，请先在「简历」页创建')
+      return
+    }
+    if (!job.jdText.trim()) {
+      setError('该岗位没有 JD 内容，请先补充 JD 或重新录入')
+      return
+    }
+    setComposingId(job.id)
+    try {
+      const items = await getExperiences()
+      if (items.length === 0) {
+        setError('个人经历库为空，请先到「经历库」页录入项目经历')
+        return
+      }
+      const picked = await pickProjectsForJob(job.jdText, items, resume)
+      const valid = picked.selected.filter((p) => items.some((it) => it.id === p.id))
+      if (valid.length === 0) {
+        setError('AI 未从经历库中选中任何项目，请重试或检查经历库')
+        return
+      }
+      const ext = await composeResumeForJob(job.jdText, valid, items, resume)
+      const composed = mergeExtractedResume(resume, ext)
+      const name = `AI-${job.title}-${new Date().toISOString().slice(0, 10)}`
+      addResumeVersion(name, composed)
+      addLog(job, '生成针对性简历', `选用 ${valid.length} 个项目 → 版本「${name}」`)
+      setDone(`已生成针对性简历版本「${name}」，可到「简历」页查看/编辑；投递该岗位建议使用此版本`)
+      if (!job.match && composed.projects.length > 0) {
+        void handleMatch(job)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成针对性简历失败')
+    } finally {
+      setComposingId(null)
+    }
+  }
+
   const handleConfirm = (job: Job) => {
     updateJob(job.id, { confirmed: true })
     addLog(job, '确认投递目标', `匹配度 ${job.match?.score ?? 0} 分`)
     setDone(`已确认「${job.company}·${job.title}」，可前往「招呼语」生成定制话术`)
+  }
+
+  /** 手动新增：粘贴招聘链接 → server 经扩展抓取 JD 入库 → 转为本地岗位 */
+  const handleManualFetch = async () => {
+    setError('')
+    setDone('')
+    const url = manualUrl.trim()
+    if (!/^https?:\/\//i.test(url)) {
+      setError('请粘贴以 http(s):// 开头的招聘链接')
+      return
+    }
+    setManualBusy(true)
+    try {
+      const r = await manualFetchJob(url)
+      if (!r.ok || !r.job) throw new Error(r.error ?? '抓取失败')
+      const dup = findDuplicateJob(jobs, { company: r.job.company ?? '', title: r.job.title ?? '', url: r.job.url })
+      if (dup) {
+        setError(`「${r.job.company || r.job.title}」与已有岗位重复，已自动拦截（去重保护）`)
+        return
+      }
+      const job = makeJob({
+        company: r.job.company || r.job.platform,
+        title: r.job.title,
+        city: r.job.city,
+        salary: r.job.salary,
+        channel: r.job.platform === 'liepin' ? '猎聘' : r.job.platform === 'boss' ? 'BOSS直聘' : r.job.platform,
+        url: r.job.url,
+        jdText: r.job.jd || r.job.title,
+        source: 'manual',
+      })
+      addJob(job)
+      addLog(job, '录入岗位（链接抓取）', `${r.job.platform} · ${job.company || job.title}`)
+      setManualUrl('')
+      setDone(`已抓取并录入「${job.title}」，可继续 AI 筛选 / 生成招呼语 / 针对性简历`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '链接抓取失败')
+    } finally {
+      setManualBusy(false)
+    }
   }
 
   const filtered = jobs.filter((j) => {
@@ -179,6 +263,9 @@ export default function JobsPage() {
           <button className="primary" onClick={() => setEditing('new')}>
             + 新增岗位
           </button>
+          <button className="ghost" disabled={manualBusy} onClick={() => void handleManualFetch()}>
+            {manualBusy ? <><span className="spinner" /> 抓取中…</> : '🔗 粘贴链接抓取'}
+          </button>
           <button className="ghost" disabled={filteringAll} onClick={() => void handleMatchAll()}>
             {filteringAll ? (
               <>
@@ -192,6 +279,20 @@ export default function JobsPage() {
         </div>
         {error && <div className="error-box" style={{ marginTop: 10 }}>{error}</div>}
         {done && <div className="info-box" style={{ marginTop: 10 }}>{done}</div>}
+        {(manualUrl || manualBusy) && (
+          <div className="row" style={{ marginTop: 10 }}>
+            <div className="field" style={{ flex: 1 }}>
+              <label>招聘链接（支持任意平台，如 BOSS/猎聘/智联等详情页）</label>
+              <input
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void handleManualFetch()}
+                placeholder="https://www.zhipin.com/... 或 https://www.liepin.com/job/xxx.shtml"
+                disabled={manualBusy}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {editing && (
@@ -261,6 +362,20 @@ export default function JobsPage() {
                   )}
                 </button>
               )}
+              <button
+                className="ghost small"
+                disabled={composingId === job.id}
+                onClick={() => void handleComposeResume(job)}
+                title="从个人经历库挑选最匹配的项目，生成针对该岗位的简历版本"
+              >
+                {composingId === job.id ? (
+                  <>
+                    <span className="spinner" /> 生成中…
+                  </>
+                ) : (
+                  '📄 针对性简历'
+                )}
+              </button>
               {job.match && !job.confirmed && (
                 <button className="primary small" onClick={() => handleConfirm(job)}>
                   ✅ 确认投递

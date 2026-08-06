@@ -25,6 +25,12 @@ describe('detectResumeFileType', () => {
     expect(detectResumeFileType(fakeFile('resume.docx', ''))).toBe('docx')
   })
 
+  it('识别 markdown', () => {
+    expect(detectResumeFileType(fakeFile('resume.md', 'text/markdown'))).toBe('markdown')
+    expect(detectResumeFileType(fakeFile('resume.md', ''))).toBe('markdown')
+    expect(detectResumeFileType(fakeFile('resume.markdown', ''))).toBe('markdown')
+  })
+
   it('老版 .doc 视为不支持', () => {
     expect(detectResumeFileType(fakeFile('resume.doc', 'application/msword'))).toBe('unsupported')
     expect(detectResumeFileType(fakeFile('resume.txt', 'text/plain'))).toBe('unsupported')

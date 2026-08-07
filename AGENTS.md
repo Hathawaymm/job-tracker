@@ -43,5 +43,8 @@
 
 ## 已知问题
 - 真实抓取依赖 Chrome 加载扩展，无法自动化验证；页面结构改版会导致扩展选择器失效（需更新 workbench 选择器）
+- **定时任务休眠方案**：电脑休眠时本机 server+Chrome 均暂停，无法"休眠中执行"。已用双重机制解决：
+  - macOS 定时唤醒：`sudo pmset repeat wakeorpoweron MTWRFSU 07:50:00`（morning 窗口前 10 分钟唤醒，需接电源）
+  - scheduler 补跑：窗口时间已过未执行则唤醒后第一个 tick 立即补跑（`pickPendingWindow`，不再精确分钟匹配）
 - server 为 ESM（NodeNext），内部 import 需带 `.js` 后缀
 - db 旧表缺列用 `ensureColumn` 迁移（见 server/src/db.ts）

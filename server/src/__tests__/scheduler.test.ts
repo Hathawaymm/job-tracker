@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateTodayWindows, randomTimeInWindow, todayStr } from '../scheduler.js'
+import { generateTodayWindows, pickPendingWindow, randomTimeInWindow, todayStr, type WindowSchedule } from '../scheduler.js'
 
 function timeToMin(t: string): number {
   const [h, m] = t.split(':').map(Number)
@@ -34,5 +34,54 @@ describe('scheduler 窗口', () => {
 
   it('todayStr 为 YYYY-MM-DD', () => {
     expect(todayStr()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('补跑：窗口时间已过且未执行 → 选中（休眠错过场景）', () => {
+    const ws: WindowSchedule[] = [
+      { label: 'morning', time: '08:36', executed: false },
+      { label: 'noon', time: '13:28', executed: false },
+      { label: 'evening', time: '18:54', executed: false },
+    ]
+    // 当前 11:05 → morning(8:36) 已过未执行，应选中补跑
+    expect(pickPendingWindow(ws, 11 * 60 + 5)?.label).toBe('morning')
+  })
+
+  it('未到时间不触发（不提前执行未到窗口）', () => {
+    const ws: WindowSchedule[] = [
+      { label: 'morning', time: '08:36', executed: false },
+      { label: 'noon', time: '13:28', executed: false },
+      { label: 'evening', time: '18:54', executed: false },
+    ]
+    // 当前 07:00 → 最早窗口 08:36 未到，不应选中
+    expect(pickPendingWindow(ws, 7 * 60)).toBeNull()
+  })
+
+  it('已执行窗口不重复补跑', () => {
+    const ws: WindowSchedule[] = [
+      { label: 'morning', time: '08:36', executed: true },
+      { label: 'noon', time: '13:28', executed: false },
+      { label: 'evening', time: '18:54', executed: false },
+    ]
+    // 当前 15:00 → morning 已执行跳过，noon(13:28) 已过未执行 → 选中 noon
+    expect(pickPendingWindow(ws, 15 * 60)?.label).toBe('noon')
+  })
+
+  it('全部已执行 → 不触发', () => {
+    const ws: WindowSchedule[] = [
+      { label: 'morning', time: '08:36', executed: true },
+      { label: 'noon', time: '13:28', executed: true },
+      { label: 'evening', time: '18:54', executed: true },
+    ]
+    expect(pickPendingWindow(ws, 20 * 60)).toBeNull()
+  })
+
+  it('按顺序补跑最早未执行窗口（morning→noon→evening）', () => {
+    const ws: WindowSchedule[] = [
+      { label: 'morning', time: '08:36', executed: false },
+      { label: 'noon', time: '13:28', executed: true },
+      { label: 'evening', time: '18:54', executed: false },
+    ]
+    // morning 已过未执行，即使 noon 已在它后面也先补 morning
+    expect(pickPendingWindow(ws, 20 * 60)?.label).toBe('morning')
   })
 })

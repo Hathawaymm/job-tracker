@@ -44,6 +44,11 @@ function timeToMin(t: string): number {
   return h * 60 + m
 }
 
+/** 补跑策略：返回第一个「时间已到/已过且未执行」的窗口；当前分钟尚未到则返回 null */
+export function pickPendingWindow(windows: WindowSchedule[], nowMin: number): WindowSchedule | null {
+  return windows.find((w) => !w.executed && timeToMin(w.time) <= nowMin) ?? null
+}
+
 interface StoredWindows {
   date: string
   windows: WindowSchedule[]
@@ -89,17 +94,20 @@ async function tick(run: () => Promise<unknown>): Promise<void> {
   const windows = ensureTodayWindows()
   const now = new Date()
   const nowMin = now.getHours() * 60 + now.getMinutes()
-  const pending = windows.find((w) => !w.executed && timeToMin(w.time) === nowMin)
+  // 补跑策略：时间已到/已过的窗口若未执行，立即执行（覆盖电脑休眠错过的窗口；
+  // pmset 定时唤醒后第一个 tick 即补跑，无需精确分钟匹配）
+  const pending = pickPendingWindow(windows, nowMin)
   if (!pending) return
 
-  // 先标记执行，防止同一分钟重复触发
+  // 先标记执行，防止重复触发
   updateTask({
     today_windows: JSON.stringify({
       date: todayStr(),
       windows: windows.map((w) => (w.label === pending.label ? { ...w, executed: true } : w)),
     }),
   })
-  log.info('scheduler', `触发窗口 ${pending.label}（${pending.time}）`)
+  const missed = timeToMin(pending.time) < nowMin
+  log.info('scheduler', missed ? `补跑错过的窗口 ${pending.label}（${pending.time}，当前 ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}）` : `触发窗口 ${pending.label}（${pending.time}）`)
   try {
     await run()
   } catch (err) {

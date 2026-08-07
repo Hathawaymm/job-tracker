@@ -65,6 +65,15 @@
 - **修复/正确姿势**：每次交互前重新 `take_snapshot` 拿新 uid；纯数据核对用 `evaluate_script` 读 DOM。
 - **验证**：重新 snapshot 后操作正常。
 
+### 6. 电脑休眠导致定时抓取错过（`executed:false` 但无任何触发记录）
+
+- **现象**：早上 8-9 点窗口内电脑休眠，`today_windows` 显示 `executed:false`，`crawl_logs` 无该窗口任何记录——任务**根本没触发**，而非"触发了但扩展离线"。UI 上"⚪离线"是页面加载时刷新到的瞬时状态（当时 Chrome 休眠未轮询），具误导性。
+- **根因**：`scheduler.ts` 原为**精确分钟匹配** `timeToMin(w.time) === nowMin`，电脑休眠错过那 1 分钟即永久错过，无补跑机制。
+- **修复**（双重）：
+  - macOS 定时唤醒：`sudo pmset repeat wakeorpoweron MTWRFSU 07:50:00`（morning 窗口前 10 分钟唤醒，需接电源；`pmset -g sched` 验证）。中午/晚上电脑常开无需唤醒。
+  - scheduler 补跑：提取纯函数 `pickPendingWindow(windows, nowMin)`，改"时间已到/已过且未执行即补跑"，唤醒后第一个 tick（每分钟）立即执行错过的窗口；`log.info` 标注「补跑错过的窗口」。
+- **验证**：scheduler 单测覆盖补跑/不提前/不重复/全执行/顺序 5 个场景；UI 扩展在线状态改为每 10s 自动轮询，并提示"休眠/关闭时显示离线属正常现象"。
+
 ---
 
 ## 三、卡住的问题

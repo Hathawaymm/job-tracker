@@ -70,6 +70,9 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
 
   useEffect(() => {
     void refreshExt()
+    // 自动轮询扩展在线状态（10s），避免休眠/关闭 Chrome 后状态过期
+    const timer = setInterval(() => void refreshExt(), 10000)
+    return () => clearInterval(timer)
   }, [refreshExt])
 
   const saveConfig = async () => {
@@ -166,6 +169,8 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
           安装步骤：① Chrome 地址栏打开 <code>chrome://extensions</code> → ② 右上角开启「开发者模式」 → ③ 点「加载已解压的扩展程序」 → ④ 选择本项目的 <code>extension/install-this</code> 目录。
           <br />
           安装后刷新本页面即可使用「立即抓取」。仅与本地服务（127.0.0.1:3001）通信，不上传任何数据。
+          <br />
+          <span className="muted">提示：电脑休眠 / Chrome 关闭时此处会显示离线，属正常现象；唤醒后自动恢复。</span>
         </div>
       )}
 

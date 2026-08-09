@@ -2,6 +2,7 @@ import type { Resume, Job } from '../types'
 import {
   buildComposeResumePrompt,
   buildDiagnosePrompt,
+  buildGenerateResumeFromBankPrompt,
   buildGreetingPrompt,
   buildInterviewSystemPrompt,
   buildMatchPrompt,
@@ -111,7 +112,7 @@ export async function diagnoseResume(resume: Resume): Promise<DiagnoseResult> {
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { thinking: 'on', effort: 'high', maxTokens: 2000 },
+    { thinking: 'on', effort: 'low', maxTokens: 2000 },
   )
   return parseDiagnoseResult(text)
 }
@@ -127,7 +128,7 @@ export async function optimizeResume(
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { thinking: 'on', effort: 'high', maxTokens: 4000 },
+    { thinking: 'on', effort: 'low', maxTokens: 4000 },
   )
   return parseResumeExtract(text)
 }
@@ -149,14 +150,18 @@ export async function starPolish(
 }
 
 /** AI 岗位匹配筛选 */
-export async function matchJob(resume: Resume, jobText: string): Promise<MatchPayload> {
-  const { system, user } = buildMatchPrompt(resume, jobText)
+export async function matchJob(
+  resume: Resume,
+  jobText: string,
+  targetIndustries: string[] = [],
+): Promise<MatchPayload> {
+  const { system, user } = buildMatchPrompt(resume, jobText, targetIndustries)
   const text = await chat(
     [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { thinking: 'on', effort: 'high', maxTokens: 1200 },
+    { thinking: 'off', maxTokens: 1200 },
   )
   return parseMatchResult(text)
 }
@@ -237,7 +242,7 @@ export async function pickProjectsForJob(
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { thinking: 'on', effort: 'high', maxTokens: 1500 },
+    { thinking: 'off', maxTokens: 1500 },
   )
   return parsePickProjectsResult(text)
 }
@@ -255,7 +260,24 @@ export async function composeResumeForJob(
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    { thinking: 'on', effort: 'high', maxTokens: 4000 },
+    { thinking: 'on', effort: 'low', maxTokens: 4000 },
+  )
+  return parseResumeExtract(text)
+}
+
+/** 简历页「AI 生成简历」：全量经历库 + 当前简历 + JD。工作/教育/基础信息由 merge 时从当前简历继承 */
+export async function generateResumeFromBank(
+  jobJd: string,
+  items: ExperienceBankItem[],
+  resume: Resume,
+): Promise<ExtractedResume> {
+  const { system, user } = buildGenerateResumeFromBankPrompt(jobJd, items, resume)
+  const text = await chat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { thinking: 'on', effort: 'low', maxTokens: 4000 },
   )
   return parseResumeExtract(text)
 }

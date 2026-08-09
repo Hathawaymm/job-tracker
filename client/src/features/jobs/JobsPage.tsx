@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '../../hooks/useAppState'
 import { composeResumeForJob, matchJob, pickProjectsForJob } from '../../lib/ai'
 import { findDuplicateJob } from '../../lib/dedupe'
 import { makeJob } from '../../lib/storage'
 import { nowIso } from '../../lib/id'
 import { mergeExtractedResume } from '../../lib/scoring'
-import { fitLevelFromScore, getExperiences, manualFetchJob, setJobDecision, type PoolJob } from '../../lib/jobsApi'
+import { fitLevelFromScore, getExperiences, getTasks, manualFetchJob, setJobDecision, type PoolJob } from '../../lib/jobsApi'
 import type { Job } from '../../types'
 import { ResumePicker, useResumeSelection } from '../../components/ResumePicker'
 import JobEditor from './JobEditor'
@@ -41,10 +41,18 @@ export default function JobsPage() {
   const [done, setDone] = useState('')
   const [manualUrl, setManualUrl] = useState('')
   const [manualBusy, setManualBusy] = useState(false)
+  const [targetIndustries, setTargetIndustries] = useState<string[]>([])
+
+  useEffect(() => {
+    void getTasks()
+      .then((t) => setTargetIndustries(t.config.targetIndustries ?? []))
+      .catch(() => {})
+  }, [])
   const [composingId, setComposingId] = useState<string | null>(null)
   const [poolRefresh, setPoolRefresh] = useState(0)
+  const [composedLink, setComposedLink] = useState<{ name: string; id: string } | null>(null)
 
-  /** 待投递池确认：转入手动岗位库（进话术/投递流程），并写服务器去重 */
+  /** 待确认池确认：转入手动岗位库（进话术/投递流程），并写服务器去重 */
   const handlePoolConfirm = async (poolJob: PoolJob) => {
     setError('')
     const score = poolJob.match_score ?? 0
@@ -70,7 +78,7 @@ export default function JobsPage() {
     addLog(job, '确认投递目标（自动抓取）', `匹配度 ${score} 分`)
     await setJobDecision(poolJob.id, 'confirmed')
     setPoolRefresh((k) => k + 1)
-    setDone(`「${poolJob.company}·${poolJob.title}」已加入投递清单，可前往「招呼语」生成定制话术`)
+    setDone(`「${poolJob.company}·${poolJob.title}」已确认待投递，进入投递清单，可前往「招呼语」生成定制话术`)
   }
 
   const handleAdd = (data: Partial<Job>) => {
@@ -109,7 +117,7 @@ export default function JobsPage() {
     setError('')
     setFilteringId(job.id)
     try {
-      const payload = await matchJob(resume, job.jdText)
+        const payload = await matchJob(resume, job.jdText, targetIndustries)
       updateJob(job.id, { match: { ...payload, checkedAt: nowIso() } })
       addLog(job, 'AI 筛选完成', `${payload.fitLevel} · ${payload.score} 分 · ${payload.reason}`)
       setDone(`「${job.company}·${job.title}」筛选完成`)
@@ -138,7 +146,7 @@ export default function JobsPage() {
         break
       }
       try {
-        const payload = await matchJob(resume, job.jdText)
+      const payload = await matchJob(resume, job.jdText, targetIndustries)
         updateJob(job.id, { match: { ...payload, checkedAt: nowIso() } })
         addLog(job, 'AI 筛选完成', `${payload.fitLevel} · ${payload.score} 分`)
       } catch (err) {
@@ -177,10 +185,11 @@ export default function JobsPage() {
       }
       const ext = await composeResumeForJob(job.jdText, valid, items, resume)
       const composed = mergeExtractedResume(resume, ext)
-      const name = `AI-${job.title}-${new Date().toISOString().slice(0, 10)}`
-      addResumeVersion(name, composed)
+      const name = `AI-${job.title}-${job.company}`
+      const newId = addResumeVersion(name, composed)
       addLog(job, '生成针对性简历', `选用 ${valid.length} 个项目 → 版本「${name}」`)
-      setDone(`已生成针对性简历版本「${name}」，可到「简历」页查看/编辑；投递该岗位建议使用此版本`)
+      setDone(`已生成针对性简历版本「${name}」，投递该岗位建议使用此版本`)
+      setComposedLink({ name, id: newId })
       if (!job.match && composed.projects.length > 0) {
         void handleMatch(job)
       }
@@ -194,7 +203,7 @@ export default function JobsPage() {
   const handleConfirm = (job: Job) => {
     updateJob(job.id, { confirmed: true })
     addLog(job, '确认投递目标', `匹配度 ${job.match?.score ?? 0} 分`)
-    setDone(`已确认「${job.company}·${job.title}」，可前往「招呼语」生成定制话术`)
+    setDone(`已确认待投递「${job.company}·${job.title}」，可前往「招呼语」生成定制话术`)
   }
 
   /** 手动新增：粘贴招聘链接 → server 经扩展抓取 JD 入库 → 转为本地岗位 */
@@ -279,6 +288,13 @@ export default function JobsPage() {
         </div>
         {error && <div className="error-box" style={{ marginTop: 10 }}>{error}</div>}
         {done && <div className="info-box" style={{ marginTop: 10 }}>{done}</div>}
+        {composedLink && (
+          <div className="info-box" style={{ marginTop: 8 }}>
+            <a href={`?tab=resume&resumeId=${encodeURIComponent(composedLink.id)}`} style={{ fontWeight: 700 }}>
+              📄 查看已生成的简历「{composedLink.name}」并编辑 →
+            </a>
+          </div>
+        )}
         {(manualUrl || manualBusy) && (
           <div className="row" style={{ marginTop: 10 }}>
             <div className="field" style={{ flex: 1 }}>

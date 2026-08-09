@@ -29,7 +29,7 @@ export type ApplicationStage =
 
 export const APPLICATION_STAGE_LABELS: Record<ApplicationStage, string> = {
   new: '待确认',
-  confirmed: '已确认',
+  confirmed: '已确认待投递',
   greeted: '话术就绪',
   submitted: '已投递',
   active: '进行中',

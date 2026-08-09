@@ -629,3 +629,13 @@ textarea.ef-edit {
     padding: 32px 40px;
   }
 }
+
+/* 目标行业标签 */
+.tag {
+  background: var(--bg-soft, #eef2ff);
+  border: 1px solid #c7d2fe;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--ink, #1f2937);
+}

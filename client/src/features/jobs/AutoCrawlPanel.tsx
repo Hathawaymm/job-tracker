@@ -34,6 +34,9 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
   const [salaryUnit, setSalaryUnit] = useState<'month' | 'year'>('month')
   const [platform, setPlatform] = useState('liepin')
   const [count, setCount] = useState(50)
+  const [threshold, setThreshold] = useState(65)
+  const [targetIndustries, setTargetIndustries] = useState<string[]>([])
+  const [industryInput, setIndustryInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
@@ -50,6 +53,8 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
       setSalaryUnit(t.config.salaryUnit ?? 'month')
       setPlatform(t.config.platform)
       setCount(t.config.count)
+      setThreshold(t.config.threshold)
+      setTargetIndustries(t.config.targetIndustries ?? [])
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载任务配置失败')
     }
@@ -79,7 +84,7 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
     setErr('')
     setMsg('')
     try {
-      await updateTasks({ keyword, city, salary, salaryUnit, platform, count, resumeText })
+      await updateTasks({ keyword, city, salary, salaryUnit, platform, count, threshold, targetIndustries, resumeText })
       setMsg('搜索设置已保存')
       void loadTasks()
     } catch (e) {
@@ -141,7 +146,7 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
     <div className="panel">
       <h3>🤖 自动抓取（{PLATFORM_LABEL[platform] ?? platform}）</h3>
       <div className="info-box">
-        每天 <b>3 个时段</b>（上午 8-9 点 / 中午 12-14 点 / 晚上 18-19 点）各在窗口内随机时刻抓取一次，每次最多 50 条 → AI 匹配（结合简历）→ <b>匹配度 ≥65%</b> 进入下方待投递池。新增 &lt;3 条时自动跳过后续时段，次日恢复。
+         每天 <b>3 个时段</b>（上午 8-9 点 / 中午 12-14 点 / 晚上 18-19 点）各在窗口内随机时刻抓取一次，每次最多 50 条 → AI 匹配（结合简历）→ <b>匹配度 ≥{threshold}%</b> 进入下方待确认池。新增 &lt;3 条时自动跳过后续时段，次日恢复。
       </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
@@ -215,6 +220,58 @@ export default function AutoCrawlPanel({ onPoolChanged }: Props) {
         <div className="field">
           <label>单次抓取上限</label>
           <input type="number" min={1} max={50} value={count} onChange={(e) => setCount(Number(e.target.value) || 50)} />
+        </div>
+        <div className="field">
+          <label>匹配度阈值（%）</label>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={threshold}
+            onChange={(e) => setThreshold(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+            title="AI 评分 ≥ 此阈值才进入待确认池"
+          />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, marginBottom: 12 }}>
+        <label className="small" style={{ display: 'block', marginBottom: 6 }}>
+          目标行业（用于 AI 评分排序：行业不匹配的岗位自动降分；不影响搜索/过滤）
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          {targetIndustries.map((ind, idx) => (
+            <span key={`${ind}-${idx}`} className="tag" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              {ind}
+              <button
+                className="link small"
+                title="删除"
+                onClick={() => {
+                  const next = [...targetIndustries]
+                  next.splice(idx, 1)
+                  setTargetIndustries(next)
+                }}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          <input
+            value={industryInput}
+            onChange={(e) => setIndustryInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && industryInput.trim()) {
+                e.preventDefault()
+                const v = industryInput.trim()
+                if (!targetIndustries.includes(v)) setTargetIndustries([...targetIndustries, v])
+                setIndustryInput('')
+              }
+            }}
+            placeholder="输入行业名回车新增，如：银行金融、电商零售、AI…"
+            style={{ width: 260 }}
+          />
+        </div>
+        <div className="small muted" style={{ marginTop: 4 }}>
+          预置：银行金融 · 电商零售 · AI · 供应链 · 互联网 · 智能制造 · 教育培训 · 其他
         </div>
       </div>
 

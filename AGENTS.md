@@ -8,6 +8,7 @@
 
 ## 结构
 - `client/` React+Vite SPA：经历库 / 简历 / 岗位库 / 招呼语 / 投递清单 / 模拟面试
+  - 关键组件：`EditableField`（点击字段即编辑）、`ExperiencePickerModal`（项目选填）、`JdPickerModal`（AI 生成选 JD）、`ResumePicker`（跨页版本选择）
 - `server/` Express 本地代理：AI 转发 + SQLite（jobs/tasks/crawl_logs/experience_bank）+ 定时调度 + 扩展任务队列
 - `extension/` WXT Chrome MV3 扩展（抓取执行器，**不在根 workspaces**）
 
@@ -20,13 +21,15 @@
 ## 数据与 AI
 - 前端数据（简历/岗位/投递/日志）存 localStorage（前缀 `jobtracker:`），**简历为手动保存**（编辑不自动落盘）
 - 经历库持久化在 server SQLite `experience_bank` 表（跨浏览器不丢）
-- 自动抓取的岗位存 server SQLite：`server/data/jobtracker.db`
+- 自动抓取的岗位存 server SQLite：`server/data/jobtracker.db`；**岗位去重用 `unique_key`**（`platform:external_id`，空则 `platform:md5(归一化公司|标题|城市)`），有 `idx_jobs_unique_key` 唯一索引兜底
 - AI key 从 `~/.local/share/opencode/auth.json` 读取（deepseek / zhipuai-coding-plan），**绝不写入前端或 git**
 
 ## 抓取机制（重要）
-- 流程：web 触发 → server 排任务 → Chrome 扩展轮询领取 → 后台 tab 抓取（复用登录态）→ 回传 → 入库去重 → 硬过滤 + AI 评分（≥65% 入池）
+- 流程：web 触发 → server 排任务 → Chrome 扩展轮询领取 → 后台 tab 抓取（复用登录态）→ 回传 → **unique_key 差集去重** → 硬过滤 + AI 评分（≥ 阈值入池，阈值可在 UI 配置）
 - **默认平台为猎聘（liepin）**，BOSS 直聘仅作 fallback；抓取前提：Chrome 已 load unpacked 加载 `extension/install-this`
+- **翻页策略（方案 B）**：猎聘非严格时间倒序，扩展每页调 `POST /api/jobs/batch-check` 过滤已抓岗位；无页数硬上限，翻页直到抓满 count 或遇空页；连续 5 页全旧视为到底（防死循环）
 - 手动抓取：`POST /api/jobs/manual` 按 URL 抓单条岗位（走扩展 fetchJd 通道，绕过列表反爬）
+- **目标行业 `targetIndustries`**（config 字段，多选）：仅用于 AI 评分排序锚定——行业不匹配的岗位自动降分；不影响搜索/过滤
 - 合规硬约束：随机延迟 3-8s、单次上限 50、绝不自动投递
 
 ## 扩展与产物

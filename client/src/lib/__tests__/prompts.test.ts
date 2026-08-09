@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildComposeResumePrompt,
   buildDiagnosePrompt,
+  buildGenerateResumeFromBankPrompt,
   buildGreetingPrompt,
   buildMatchPrompt,
   buildPickProjectsPrompt,
@@ -66,6 +67,18 @@ describe('buildMatchPrompt', () => {
     expect(user).toContain('fitLevel')
     expect(user).toContain('reject')
   })
+
+  it('传入目标行业时注入行业锚定规则', () => {
+    const { system, user } = buildMatchPrompt(sampleResume(), '招聘金融行业项目经理', ['银行金融', '电商零售'])
+    expect(user).toContain('银行金融、电商零售')
+    expect(user).toContain('行业锚定规则')
+    expect(system).toContain('求职匹配顾问')
+  })
+
+  it('未传目标行业时不含行业规则（退化为原逻辑）', () => {
+    const { user } = buildMatchPrompt(sampleResume(), '招聘项目经理')
+    expect(user).not.toContain('行业锚定规则')
+  })
 })
 
 describe('buildGreetingPrompt', () => {
@@ -117,5 +130,21 @@ describe('buildPickProjectsPrompt / buildComposeResumePrompt', () => {
     expect(system).toContain('针对性简历')
     expect(user).toContain('EDI 对接')
     expect(user).toContain('张三')
+  })
+})
+
+describe('buildGenerateResumeFromBankPrompt', () => {
+  const items = [{ id: 1, company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链'] }]
+  it('包含 JD、全量经历库与原简历', () => {
+    const { system, user } = buildGenerateResumeFromBankPrompt('需要供应链经验', items, sampleResume())
+    expect(system).toContain('全量个人经历库')
+    expect(user).toContain('需要供应链经验')
+    expect(user).toContain('[id=1]')
+    expect(user).toContain('张三')
+  })
+  it('要求不输出工作/教育（由系统继承）', () => {
+    const { user } = buildGenerateResumeFromBankPrompt('JD', items, sampleResume())
+    expect(user).toContain('工作经历、教育经历')
+    expect(user).toContain('自动保留')
   })
 })

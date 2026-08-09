@@ -46,6 +46,12 @@ function ensureColumn(table: string, column: string, ddl: string): void {
   }
 }
 ensureColumn('jobs', 'url', 'url TEXT')
+// 岗位唯一指纹（external_id 优先，空则公司|标题|城市 MD5），用于去重
+ensureColumn('jobs', 'unique_key', 'unique_key TEXT')
+// 首次迁移：回填存量 unique_key；重复数据仅保留最新一条；建唯一索引作为最后防线
+db.exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_unique_key ON jobs(unique_key) WHERE unique_key IS NOT NULL;
+`)
 
 // ---- 任务配置表（单行）----
 db.exec(`
@@ -95,6 +101,8 @@ export interface TaskConfig {
   poolDays: number
   delayRange: [number, number]
   resumeText: string
+  /** 目标行业（仅用于评分排序锚定，不影响搜索/过滤） */
+  targetIndustries: string[]
 }
 
 export const DEFAULT_TASK_CONFIG: TaskConfig = {
@@ -109,6 +117,7 @@ export const DEFAULT_TASK_CONFIG: TaskConfig = {
   poolDays: 5,
   delayRange: [3, 8],
   resumeText: '',
+  targetIndustries: ['银行金融', '电商零售', 'AI'],
 }
 
 export interface TaskRow {
@@ -163,14 +172,15 @@ export interface JobRow {
   match_reason: string
   decision: string
   greeting: string
+  unique_key: string | null
 }
 
 export function insertJob(job: Omit<JobRow, 'id'>): number {
   const res = db
     .prepare(
       `INSERT INTO jobs (platform, external_id, url_hash, url, title, company, salary, city, jd,
-        fetched_at, is_new, hard_ok, match_score, match_reason, decision, greeting)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        fetched_at, is_new, hard_ok, match_score, match_reason, decision, greeting, unique_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       job.platform,
@@ -189,8 +199,23 @@ export function insertJob(job: Omit<JobRow, 'id'>): number {
       job.match_reason,
       job.decision,
       job.greeting,
+      job.unique_key,
     )
   return Number(res.lastInsertRowid)
+}
+
+/** 批量查询已存在的 unique_key（分批查，避免大 IN 变慢；入参 ≤50 个一批） */
+export function batchFindExistingKeys(keys: string[]): string[] {
+  const existing = new Set<string>()
+  for (let i = 0; i < keys.length; i += 50) {
+    const batch = keys.slice(i, i + 50)
+    const placeholders = batch.map(() => '?').join(',')
+    const rows = db
+      .prepare(`SELECT unique_key FROM jobs WHERE unique_key IN (${placeholders})`)
+      .all(...batch) as Array<{ unique_key: string }>
+    for (const r of rows) if (r.unique_key) existing.add(r.unique_key)
+  }
+  return [...existing]
 }
 
 export function findDecidedByHash(urlHash: string): string | null {
@@ -205,7 +230,11 @@ export function findPoolJobs(config: TaskConfig, limit = 50): JobRow[] {
   return db
     .prepare(
       `SELECT * FROM jobs
-       WHERE decision = 'pending' AND match_score >= ? AND fetched_at >= ?
+       WHERE id IN (
+         SELECT MAX(id) FROM jobs
+         WHERE decision = 'pending' AND match_score >= ? AND fetched_at >= ?
+         GROUP BY COALESCE(unique_key, url_hash)
+       )
        ORDER BY match_score DESC, fetched_at DESC
        LIMIT ?`,
     )
@@ -230,7 +259,9 @@ export function updateJobJd(id: number, jd: string): void {
 
 export function countNewSince(threshold: number, sinceIso: string): number {
   const row = db
-    .prepare('SELECT COUNT(*) AS n FROM jobs WHERE match_score >= ? AND fetched_at >= ?')
+    .prepare(
+      'SELECT COUNT(*) AS n FROM (SELECT 1 FROM jobs WHERE match_score >= ? AND fetched_at >= ? GROUP BY COALESCE(unique_key, url_hash))',
+    )
     .get(threshold, sinceIso) as { n: number }
   return row.n
 }

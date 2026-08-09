@@ -10,6 +10,7 @@ export interface TaskConfigPayload {
   poolDays: number
   delayRange: [number, number]
   hasResume: boolean
+  targetIndustries: string[]
 }
 
 export interface TaskInfo {
@@ -79,6 +80,7 @@ export interface TaskUpdatePayload {
   poolDays?: number
   delayRange?: [number, number]
   resumeText?: string
+  targetIndustries?: string[]
   enabled?: boolean
 }
 

@@ -16,9 +16,16 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
 }
 
 /** 用 DeepSeek 对「岗位 JD + 简历」做匹配度评分（0-100）并给出理由 */
-export async function aiMatchScore(jd: string, resumeText: string): Promise<MatchOutcome> {
+export async function aiMatchScore(jd: string, resumeText: string, targetIndustries: string[] = []): Promise<MatchOutcome> {
   const creds = getCredentials()
   if (!creds.deepseek) throw new Error('未配置 DeepSeek key（auth.json deepseek provider）')
+
+  const industryRule =
+    targetIndustries.length > 0
+      ? `行业锚定规则（首要判断维度）：先判断岗位所属行业是否在候选人目标行业（${targetIndustries.join('、')}）内。
+- 行业明显不相关时，score 应显著降低（一般低于 40）；行业相关后再重点评估技能/经验匹配度。
+- reason 中应明确指出岗位行业与目标行业的关系（匹配/不匹配）。`
+      : ''
 
   const body = {
     model: 'deepseek-v4-flash',
@@ -26,7 +33,8 @@ export async function aiMatchScore(jd: string, resumeText: string): Promise<Matc
       {
         role: 'system',
         content:
-          '你是严格的求职匹配顾问。仅输出一个 JSON 对象 {"score": number, "reason": string}，不要输出任何其他内容。score 为 0-100 的匹配度整数；reason 用一句简体中文说明最关键的匹配点或明显差距。',
+          '你是严格的求职匹配顾问。仅输出一个 JSON 对象 {"score": number, "reason": string}，不要输出任何其他内容。score 为 0-100 的匹配度整数；reason 用一句简体中文说明最关键的匹配点或明显差距。' +
+          (industryRule ? `\n\n${industryRule}` : ''),
       },
       {
         role: 'user',

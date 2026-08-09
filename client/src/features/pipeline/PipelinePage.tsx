@@ -12,7 +12,7 @@ type StageFilter = 'all' | ApplicationStage
 const STAGES: Array<{ key: StageFilter; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'new', label: '待确认' },
-  { key: 'confirmed', label: '已确认' },
+  { key: 'confirmed', label: '已确认待投递' },
   { key: 'greeted', label: '话术就绪' },
   { key: 'submitted', label: '已投递' },
   { key: 'active', label: '进行中' },

@@ -1,9 +1,9 @@
-import { countNewSince, findDecidedByHash, getJobById, getTaskConfig, insertCrawlLog, insertJob, updateCrawlLog, updateJobJd, updateJobMatch, updateTask } from './db.js'
+import { batchFindExistingKeys, countNewSince, findDecidedByHash, getJobById, getTaskConfig, insertCrawlLog, insertJob, updateCrawlLog, updateJobJd, updateJobMatch, updateTask } from './db.js'
 import type { JobRow } from './db.js'
 import type { RawJob, SearchQuery } from './adapters/types.js'
 import { hardFilter, parseExpectedMinK } from './filter.js'
 import { aiMatchScore } from './matcher.js'
-import { urlHash } from './hash.js'
+import { uniqueKey, urlHash } from './hash.js'
 import { enqueueFetchJd, enqueueSearch, isExtensionOnline, setProgress } from './ext.js'
 import { log } from './logger.js'
 
@@ -64,6 +64,7 @@ export async function fetchJobByUrl(url: string, platform: string): Promise<JobR
     match_reason: '',
     decision: 'pending',
     greeting: '',
+    unique_key: uniqueKey(platform || 'manual', null, company, title, ''),
   })
   const job = getJobById(id)
   if (!job) throw new Error('岗位入库失败')
@@ -126,6 +127,13 @@ export async function runCrawl(triggeredBy: 'manual' | 'scheduled', resumeTextOv
     let skippedDup = 0
     let malformed = 0
     const pendingIds: number[] = []
+    // 方案 B：批量集合比对——一次性查出本批已存在的 unique_key，差集只插入新岗位
+    const batchKeys: string[] = []
+    for (const raw of rawJobs) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+      batchKeys.push(uniqueKey(config.platform, raw.externalId, raw.company, raw.title, raw.city))
+    }
+    const existingSet = new Set(batchFindExistingKeys(batchKeys))
     for (const raw of rawJobs) {
       // 防御：扩展回传的数据形状异常（如嵌套数组）时跳过并留痕，避免整批失败
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -133,11 +141,12 @@ export async function runCrawl(triggeredBy: 'manual' | 'scheduled', resumeTextOv
         log.error('crawl', '畸形岗位条目，已跳过', { index: malformed - 1, type: typeof raw, isArray: Array.isArray(raw), keys: raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.keys(raw) : [], title: raw && typeof raw === 'object' ? (raw as { title?: unknown }).title : null })
         continue
       }
-      const h = urlHash(raw.url || `${raw.title}${raw.company}`)
-      if (findDecidedByHash(h)) {
+      const uk = uniqueKey(config.platform, raw.externalId, raw.company, raw.title, raw.city)
+      if (existingSet.has(uk)) {
         skippedDup++
         continue
       }
+      const h = urlHash(raw.url || `${raw.title}${raw.company}`)
       const id = insertJob({
         platform: config.platform,
         external_id: raw.externalId ?? null,
@@ -155,6 +164,7 @@ export async function runCrawl(triggeredBy: 'manual' | 'scheduled', resumeTextOv
         match_reason: '',
         decision: 'pending',
         greeting: '',
+        unique_key: uk,
       })
       inserted++
       pendingIds.push(id)
@@ -173,7 +183,7 @@ export async function runCrawl(triggeredBy: 'manual' | 'scheduled', resumeTextOv
         continue
       }
       try {
-        const outcome = await aiMatchScore(job.jd || `${job.title} ${job.company}`, resumeText)
+        const outcome = await aiMatchScore(job.jd || `${job.title} ${job.company}`, resumeText, config.targetIndustries)
         updateJobMatch(id, outcome.score, outcome.reason)
         scored++
         if (outcome.score >= config.threshold) {

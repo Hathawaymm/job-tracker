@@ -24,6 +24,14 @@
 | 6 | 文件导入导出 | `detectResumeFileType` 加 markdown；Word 导出（docx 库，`ResumePreview.tsx`，零 token）；PDF/Word/Markdown 上传各只耗 1 次 AI 提取 | node 实测生成 docx 且 mammoth 可读回 |
 | 7 | 字段级就地编辑 | `EditableField.tsx`（浏览态纸样/编辑态蓝光 `#3b82f6`）；`ResumeForm.tsx` 全字段 + `ExperienceBankPage.tsx` 卡片就地编辑（乐观更新+失败回滚）；tab 顺序经历库第一/简历第二 | typecheck + 55+27 测试 + 浏览器实测 |
 | 8 | 日志基建 | `server/src/logger.ts` 零依赖双写（console + `server/data/logs/jobtracker-YYYY-MM-DD.log` 按天滚动）；替换 crawler/scheduler/index/ext 全部 console；加任务领取/回传 shape/畸形条目/全局异常埋点 | 日志落盘实测 |
+| 9 | 评分行业锚定 | `targetIndustries` 配置（多选，可增删改，默认 `银行金融/电商零售/AI`）；`buildMatchPrompt`/`aiMatchScore` system prompt 加行业锚定规则（行业不匹配降分 <40 或 reject）；仅影响评分排序，不影响搜索/过滤 | prompts 单测断言 + 人工看 reason 判断 |
+| 10 | AI 降配省钱 | 纯文字任务降推理：matchJob/pickProjects `thinking off`；composeResume/optimize/diagnose `effort low`；模拟面试保持 `deepseek-v4-flash + effort high`（用户决策不换 reasoner） | typecheck + 全量测试通过 |
+| 11 | 匹配度阈值暴露 | `AutoCrawlPanel` 加「匹配度阈值 %」输入（0-100，默认 65），保存即按新阈值入池/评分；server 早已支持 | UI 实测 |
+| 12 | 岗位去重改 unique_key | 方案 B：`external_id`（猎聘 job id，125/125 可提取）为唯一指纹，空则 `平台:md5(归一化公司\|标题\|城市)`；`batchFindExistingKeys` 分批查 + `idx_jobs_unique_key` 唯一索引兜底；`findPoolJobs`/`countNewSince` 按 unique_key 去重 | hash 单测 5 项 + batch-check 接口实测 |
+| 13 | 项目经历「从经历库选填」 | `ExperiencePickerModal`（搜索/选中/确认选择）；`ResumeForm` 项目模块加「📥 从经历库选择」+ 每条「选填」；覆盖前二次确认；填充后即普通编辑条目，不同步回经历库 | typecheck + 浏览器实测 |
+| 14 | 简历页「AI 生成简历」 | `buildGenerateResumeFromBankPrompt` + `generateResumeFromBank`（全量经历库项目 + 当前简历 + JD）；`JdPickerModal` 选 JD（岗位库优先 + 粘贴兜底）；merge 时工作/教育/基础信息自动继承当前简历 | prompts 单测 2 项 |
+| 15 | 针对性简历跳转 | 生成成功后显示「查看已生成的简历」链接 → `?tab=resume&resumeId=`；`App` 读 URL 初始化 tab + `ResumePage initialResumeId`；命名 `AI-岗位-公司` | 浏览器实测 |
+| 16 | 已确认待投递 + 待确认池 | `APPLICATION_STAGE_LABELS.confirmed` 改「已确认待投递」；`PoolList` 标题「待投递池」→「待确认池」（阈值动态显示）；确认文案统一 | 浏览器实测 |
 
 ---
 
@@ -73,6 +81,23 @@
   - macOS 定时唤醒：`sudo pmset repeat wakeorpoweron MTWRFSU 07:50:00`（morning 窗口前 10 分钟唤醒，需接电源；`pmset -g sched` 验证）。中午/晚上电脑常开无需唤醒。
   - scheduler 补跑：提取纯函数 `pickPendingWindow(windows, nowMin)`，改"时间已到/已过且未执行即补跑"，唤醒后第一个 tick（每分钟）立即执行错过的窗口；`log.info` 标注「补跑错过的窗口」。
 - **验证**：scheduler 单测覆盖补跑/不提前/不重复/全执行/顺序 5 个场景；UI 扩展在线状态改为每 10s 自动轮询，并提示"休眠/关闭时显示离线属正常现象"。
+
+### 7. 每次抓取不到 count 就停 + 深页永远抓不到（翻页/去重设计）
+
+- **现象**：count=50 实际只回传 29/10/1 条；`runSearch` 每次从第 1 页翻固定 `maxPages=7` 页，第 8 页之后永远不抓；同一岗位（url_hash）最多 5 条重复入库。
+- **根因**：①`maxPages = min(12, ceil(count/10)+2)` 固定页数上限；②`findDecidedByHash` 只跳过 confirmed/ignored，pending 岗位每次重复插入；③jobs 表 url_hash 无唯一约束。
+- **方案 B（因猎聘非严格时间倒序，弃用倒序中断法）**：unique_key 去重 + 无上限翻页 + 连续全旧页防死循环。
+  - unique_key = `platform:external_id`（猎聘 job id，URL `job/<id>.shtml` 提取，100% 可用）；空则 `platform:md5(归一化公司|标题|城市)`（`normalizeText` 去"市/有限公司"后缀）。
+  - `batchFindExistingKeys` 分批查（≤50/批，避免大 IN）；`idx_jobs_unique_key` 唯一索引兜底；`findPoolJobs`/`countNewSince` 按 unique_key 去重。
+  - 扩展 `runSearch`：每页调 `POST /api/jobs/batch-check` 过滤已抓岗位；终止条件 = 抓满 count 或空页（重试仍空）；**连续 5 页全旧视为到底**（防翻页超限后猎聘返回重复内容导致死循环）。
+- **验证**：batch-check 接口实测（插入后返回 `existingIndices:[0]`）；hash 单测 5 项；连续抓 2 次 `inserted` 骤减。
+
+### 8. ⚠️ 清理 SQL 误删全部岗位（重要教训）
+
+- **现象**：执行存量去重 SQL 时，jobs 表 125 条被删到 1 条。
+- **根因**：回填 `unique_key` 的 `UPDATE` 因**已存在的 UNIQUE 索引**（partial 索引 `WHERE unique_key IS NOT NULL`）在遇到重复 external_id 时抛 `UNIQUE constraint failed`，导致回填未完成、unique_key 仍全为 NULL；随后 `DELETE WHERE id NOT IN (SELECT MAX(id) ... GROUP BY unique_key)` 把**所有 NULL 归为一组**，只保留 MAX(id) 一条，其余全删。两步中间未检查状态。
+- **修复/教训**：①回填前必须先处理重复（或先删 UNIQUE 索引，回填+删重后再建）；②`GROUP BY` 在列全为 NULL 时会把所有行归一组，`NOT IN` 删除语句极危险；③对生产数据执行破坏性 SQL 前**必须先备份**（`sqlite3 db ".backup backup.db"`）；④CLI 会话与运行中 server 并发写 DB 时，WAL 状态不可预期。
+- **验证**：已清空剩余脏数据（"居家打字员"非目标岗位），岗位库需重新抓取恢复；crawl_logs 历史保留。
 
 ---
 

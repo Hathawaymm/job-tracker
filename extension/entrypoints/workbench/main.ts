@@ -277,14 +277,50 @@ async function openTabAndScrape(url: string, fn: () => unknown, waitForCards = f
   }
 }
 
+/** 方案 B：批量比对已抓岗位。向 server 传本页岗位元数据，返回「已存在」的下标，过滤后只保留新岗位 */
+async function filterFreshJobs(platform: string, items: RawJob[]): Promise<{ fresh: RawJob[]; existedCount: number }> {
+  try {
+    const res = await fetch(`${SERVER}/api/jobs/batch-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platform,
+        jobs: items.map((j) => ({ externalId: j.externalId, company: j.company, title: j.title, city: j.city })),
+      }),
+    })
+    const data = (await res.json()) as { existingIndices?: number[] }
+    const existing = new Set(data.existingIndices ?? [])
+    const fresh = items.filter((_, i) => !existing.has(i))
+    return { fresh, existedCount: items.length - fresh.length }
+  } catch {
+    // server 不可达时保守返回全部（宁可重复由入库差集兜底，也不漏抓）
+    return { fresh: items, existedCount: 0 }
+  }
+}
+
 async function runSearch(query: SearchQuery): Promise<RawJob[]> {
   const jobs: RawJob[] = []
   const seen = new Set<string>()
-  const maxPages = Math.min(12, Math.ceil(query.count / 10) + 2)
-  for (let pageNum = 1; pageNum <= maxPages && jobs.length < query.count; pageNum++) {
-    const items = (await openTabAndScrape(buildSearchUrl(query, pageNum), scrapeList, true)) as RawJob[]
-    if (items.length === 0) break
-    for (const it of items) {
+  // 无页数硬上限：翻页直到抓满 count 或遇到空页；连续全旧页 ≥5 视为已到底部（防死循环）
+  let consecutiveOldPages = 0
+  for (let pageNum = 1; jobs.length < query.count; pageNum++) {
+    let items = (await openTabAndScrape(buildSearchUrl(query, pageNum), scrapeList, true)) as RawJob[]
+    // 空页重试一次：规避偶发反爬/页面未加载完导致提前停止；重试仍空才停
+    if (items.length === 0) {
+      await sleep(3000)
+      await keepAlive()
+      items = (await openTabAndScrape(buildSearchUrl(query, pageNum), scrapeList, true)) as RawJob[]
+      if (items.length === 0) break
+    }
+    // 过滤掉已抓过的岗位（server 批量比对）
+    const { fresh, existedCount } = await filterFreshJobs(query.platform ?? 'liepin', items)
+    if (existedCount >= items.length) {
+      consecutiveOldPages++
+      if (consecutiveOldPages >= 5) break
+    } else {
+      consecutiveOldPages = 0
+    }
+    for (const it of fresh) {
       const key = it.externalId || it.url
       if (seen.has(key)) continue
       seen.add(key)
@@ -317,8 +353,13 @@ async function postResult(body: Record<string, unknown>): Promise<void> {
 }
 
 async function pollOnce(): Promise<void> {
+  // 心跳保活：即使正在抓取也轮询 /api/ext/task 刷新 server 端在线状态，避免 UI 误报「扩展离线」
   if (processing) {
-    setStatus('上一任务处理中，跳过本轮轮询…')
+    try {
+      await fetch(`${SERVER}/api/ext/task`)
+    } catch {
+      // 本地服务不可达，忽略
+    }
     return
   }
   let data: { taskId?: string; id?: string; type?: string; query?: SearchQuery; url?: string } | null = null

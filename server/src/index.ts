@@ -1,11 +1,12 @@
 import express from 'express'
 import cors from 'cors'
 import { getCredentials } from './keys.js'
-import { findPoolJobs, getJobById, getTask, getTaskConfig, recentRuns, setDecision, updateTask } from './db.js'
+import { DEFAULT_TASK_CONFIG, batchFindExistingKeys, findPoolJobs, getJobById, getTask, getTaskConfig, recentRuns, setDecision, updateTask } from './db.js'
 import { deleteExperience, insertExperience, listExperiences, updateExperience } from './db.js'
 import { fetchJobByUrl, runCrawl, type RunResult } from './crawler.js'
 import { startScheduler } from './scheduler.js'
 import { completeTask, failTask, getProgress, isExtensionOnline, peekTask, touchHeartbeat } from './ext.js'
+import { uniqueKey } from './hash.js'
 import { log } from './logger.js'
 
 const DEEPSEEK_BASE = 'https://api.deepseek.com'
@@ -153,7 +154,7 @@ app.post('/api/ai/vision', async (req, res) => {
 // 岗位库：抓取任务 / 待投递池 / 确认忽略 / 日志
 // ---------------------------------------------------------------------------
 
-const CONFIG_KEYS = ['keyword', 'city', 'salary', 'salaryUnit', 'platform', 'count', 'threshold', 'minNew', 'poolDays', 'delayRange', 'resumeText'] as const
+const CONFIG_KEYS = ['keyword', 'city', 'salary', 'salaryUnit', 'platform', 'count', 'threshold', 'minNew', 'poolDays', 'delayRange', 'resumeText', 'targetIndustries'] as const
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n))
@@ -179,6 +180,7 @@ app.get('/api/jobs/tasks', (_req, res) => {
       poolDays: config.poolDays,
       delayRange: config.delayRange,
       hasResume: Boolean(config.resumeText.trim()),
+      targetIndustries: config.targetIndustries,
     },
     todayWindows: task.today_windows ? (JSON.parse(task.today_windows) as unknown) : null,
     lastRunAt: task.last_run_at,
@@ -200,6 +202,7 @@ app.put('/api/jobs/tasks', (req, res) => {
   config.poolDays = clamp(Number(config.poolDays) || 5, 1, 30)
   if (config.salaryUnit !== 'month' && config.salaryUnit !== 'year') config.salaryUnit = 'month'
   if (!Array.isArray(config.delayRange) || config.delayRange.length !== 2) config.delayRange = [3, 8]
+  if (!Array.isArray(config.targetIndustries)) config.targetIndustries = DEFAULT_TASK_CONFIG.targetIndustries
   updateTask({ config: JSON.stringify(config) })
   if (typeof body.enabled === 'boolean') updateTask({ enabled: body.enabled ? 1 : 0 })
   res.json({ ok: true })
@@ -284,6 +287,33 @@ app.post('/api/jobs/manual', async (req, res) => {
     const msg = err instanceof Error ? err.message : String(err)
     res.status(500).json({ error: msg })
   }
+})
+
+// 方案 B：批量比对岗位是否已存在（扩展翻页时调用，返回已存在的下标）
+app.post('/api/jobs/batch-check', (req, res) => {
+  const body = (req.body ?? {}) as { platform?: unknown; jobs?: unknown }
+  const platform = typeof body.platform === 'string' ? body.platform : 'liepin'
+  const jobs = Array.isArray(body.jobs) ? body.jobs : []
+  const existingIndices: number[] = []
+  const keys: string[] = []
+  const byKey = new Map<string, number>()
+  jobs.forEach((raw, i) => {
+    const o = (raw ?? {}) as { externalId?: unknown; company?: unknown; title?: unknown; city?: unknown }
+    const uk = uniqueKey(
+      platform,
+      typeof o.externalId === 'string' ? o.externalId : null,
+      typeof o.company === 'string' ? o.company : '',
+      typeof o.title === 'string' ? o.title : '',
+      typeof o.city === 'string' ? o.city : '',
+    )
+    keys.push(uk)
+    byKey.set(uk, i)
+  })
+  for (const k of batchFindExistingKeys(keys)) {
+    const idx = byKey.get(k)
+    if (idx !== undefined) existingIndices.push(idx)
+  }
+  res.json({ existingIndices })
 })
 
 // ---------------------------------------------------------------------------

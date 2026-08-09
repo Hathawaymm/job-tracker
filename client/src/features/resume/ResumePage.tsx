@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../hooks/useAppState'
-import { diagnoseResume, optimizeResume } from '../../lib/ai'
+import { diagnoseResume, generateResumeFromBank, optimizeResume } from '../../lib/ai'
 import { importResumeFile, detectResumeFileType } from '../../lib/resumeImport'
 import { mergeExtractedResume, type DiagnoseResult } from '../../lib/scoring'
 import { emptyResume, saveResumes } from '../../lib/storage'
 import type { Resume, ResumeVersion } from '../../types'
+import { getExperiences } from '../../lib/jobsApi'
 import ResumeForm from './ResumeForm'
 import ResumePreview from './ResumePreview'
+import JdPickerModal from '../../components/JdPickerModal'
 
 const BUSY_LABEL: Record<string, string> = {
   import_pdf: '解析 PDF…',
@@ -15,10 +17,13 @@ const BUSY_LABEL: Record<string, string> = {
   import_image: '识图导入…',
 }
 
-export default function ResumePage() {
+export default function ResumePage({ initialResumeId }: { initialResumeId?: string }) {
   const { state, updateResumeVersion, addResumeVersion, deleteResumeVersion, duplicateResumeVersion } = useApp()
   const resumes = state.resumes
-  const [currentId, setCurrentId] = useState<string>(resumes[0]?.id ?? '')
+  const [currentId, setCurrentId] = useState<string>(() => {
+    if (initialResumeId && resumes.some((v) => v.id === initialResumeId)) return initialResumeId
+    return resumes[0]?.id ?? ''
+  })
   const [busy, setBusy] = useState('')
   const [diagnose, setDiagnose] = useState<DiagnoseResult | null>(null)
   const [error, setError] = useState('')
@@ -26,6 +31,8 @@ export default function ResumePage() {
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [preview, setPreview] = useState<ResumeVersion | null>(null)
   const [optimizing, setOptimizing] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [jdPicker, setJdPicker] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const toastTimer = useRef<number | null>(null)
 
@@ -142,6 +149,33 @@ export default function ResumePage() {
     }
   }
 
+  // 需求2：基于经历库全量 + 目标岗位 JD，AI 生成定制简历（工作/教育/基础信息继承当前简历）
+  const handleGenerateFromBank = async (jd: string, src: { company: string; title: string }) => {
+    if (!current) return
+    setJdPicker(false)
+    setGenerating(true)
+    setError('')
+    setDone('')
+    try {
+      const items = await getExperiences()
+      if (items.length === 0) {
+        setError('个人经历库为空，请先到「经历库」页录入项目经历')
+        return
+      }
+      const ext = await generateResumeFromBank(jd, items, current.resume)
+      const merged = mergeExtractedResume(current.resume, ext)
+      const base = src.company && src.title ? `${src.title}-${src.company}` : src.title || '粘贴JD'
+      const name = `AI-${base}-${new Date().toISOString().slice(0, 10)}`
+      const id = addResumeVersion(name, merged)
+      setCurrentId(id)
+      showToast('ok', `已生成定制简历「${name}」，可编辑后保存；原版本已保留`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'AI 生成简历失败')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   return (
     <div>
       {toast && <div className={`toast ${toast.type}`}>{toast.text}</div>}
@@ -185,6 +219,9 @@ export default function ResumePage() {
           </button>
           <button className="ghost" disabled={busy === 'diagnose'} onClick={() => void handleDiagnose()}>
             {busy === 'diagnose' ? <><span className="spinner" /> 诊断中…</> : '🔍 AI 诊断'}
+          </button>
+          <button className="ghost" disabled={!current || generating} onClick={() => current && setJdPicker(true)}>
+            {generating ? <><span className="spinner" /> 生成中…</> : '✨ AI 生成简历'}
           </button>
         </div>
         <div className="small muted" style={{ marginTop: 8 }}>
@@ -262,6 +299,10 @@ export default function ResumePage() {
       )}
 
       {preview && <ResumePreview version={preview} onClose={() => setPreview(null)} />}
+
+      {jdPicker && (
+        <JdPickerModal jobs={state.jobs} onClose={() => setJdPicker(false)} onPick={(jd, src) => void handleGenerateFromBank(jd, src)} />
+      )}
     </div>
   )
 }

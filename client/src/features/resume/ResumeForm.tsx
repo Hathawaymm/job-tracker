@@ -3,6 +3,8 @@ import type { Education, Project, Resume, WorkExperience } from '../../types'
 import { starPolish } from '../../lib/ai'
 import { uid } from '../../lib/id'
 import EditableField from '../../components/EditableField'
+import ExperiencePickerModal from '../../components/ExperiencePickerModal'
+import type { ExperienceItem } from '../../lib/jobsApi'
 
 interface Props {
   resume: Resume
@@ -17,6 +19,7 @@ const EMPTY_EDU = (): Education => ({ id: uid(), school: '', major: '', degree: 
 export default function ResumeForm({ resume, onChange, disabled }: Props) {
   const [polishing, setPolishing] = useState<string | null>(null)
   const [polishBackup, setPolishBackup] = useState<{ projectId: string; points: string[] } | null>(null)
+  const [pickerFor, setPickerFor] = useState<string | null>(null)
 
   const set = (patch: Partial<Resume>) => onChange({ ...resume, ...patch })
 
@@ -60,6 +63,23 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
       updateProject(p.id, { points: polishBackup.points })
       setPolishBackup(null)
     }
+  }
+
+  /** 需求：从经历库选填项目。覆盖前二次确认；填充后即普通编辑条目，不同步回经历库 */
+  const handlePickFromBank = (p: Project, item: ExperienceItem) => {
+    const existing = p.description.trim() || p.points.some((x) => x.trim())
+    if (existing && !confirm('即将覆盖当前内容，是否继续？')) {
+      setPickerFor(null)
+      return
+    }
+    updateProject(p.id, {
+      company: item.company,
+      name: item.name,
+      role: item.role,
+      description: item.description,
+      points: [...item.points],
+    })
+    setPickerFor(null)
   }
 
   const readonly = disabled ?? false
@@ -159,7 +179,10 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
       <div className="panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3>项目经历</h3>
-          <button className="ghost small" disabled={readonly} onClick={addProject}>+ 添加</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="ghost small" disabled={readonly} onClick={() => setPickerFor('__new__')}>📥 从经历库选择</button>
+            <button className="ghost small" disabled={readonly} onClick={addProject}>+ 添加</button>
+          </div>
         </div>
         {resume.projects.map((p) => (
           <div key={p.id} className="card" style={{ marginBottom: 12 }}>
@@ -178,6 +201,7 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
               </div>
               {!readonly && (
                 <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-end', marginBottom: 12 }}>
+                  <button className="ghost small" onClick={() => setPickerFor(p.id)}>📥 选填</button>
                   <button
                     className="danger small"
                     onClick={() => { if (confirm('确定删除这条项目经历？')) set({ projects: resume.projects.filter((x) => x.id !== p.id) }) }}
@@ -255,6 +279,33 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
           </div>
         ))}
       </div>
+
+      {pickerFor !== null && (
+        <ExperiencePickerModal
+          onClose={() => setPickerFor(null)}
+            onPick={(item) => {
+              if (pickerFor === '__new__') {
+                set({
+                  projects: [
+                    {
+                      id: uid(),
+                      company: item.company,
+                      name: item.name,
+                      role: item.role,
+                      description: item.description,
+                      points: [...item.points],
+                    },
+                    ...resume.projects,
+                  ],
+                })
+              } else {
+                const target = resume.projects.find((p) => p.id === pickerFor)
+                if (target) handlePickFromBank(target, item)
+              }
+              setPickerFor(null)
+            }}
+        />
+      )}
     </div>
   )
 }

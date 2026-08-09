@@ -75,15 +75,26 @@ ${target.points.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
 }
 
 // ---- 岗位匹配筛选 ----
-export function buildMatchPrompt(resume: Resume, jobText: string): { system: string; user: string } {
+export function buildMatchPrompt(
+  resume: Resume,
+  jobText: string,
+  targetIndustries: string[] = [],
+): { system: string; user: string } {
   const system =
     '你是一位严谨的求职匹配顾问。请结合候选人简历与岗位 JD，评估匹配度，剔除明显超出能力范围或不匹配的岗位。回答必须用简体中文。'
+  const industryRule =
+    targetIndustries.length > 0
+      ? `\n行业锚定规则（首要判断维度）：先判断岗位所属行业是否在候选人目标行业（${targetIndustries.join('、')}）内。
+- 行业明显不相关时，score 应显著降低（一般低于 40，或直接标记 reject）；行业相关后再重点评估技能/经验匹配度。
+- reason 中应明确指出岗位行业与目标行业的关系（匹配/不匹配）。`
+      : ''
   const user = `请评估候选人与该岗位的匹配程度，并给出建议。
 要求：输出 JSON，格式为 {"score": number, "fitLevel": "high"|"medium"|"low"|"reject", "reason": string, "suggestion": string}。
 - score 为 0-100 整数；
 - fitLevel 取值：high=高度匹配建议投递，medium=基本匹配可尝试，low=匹配度低不建议优先，reject=明确不匹配（如硬性要求差距过大、明显超出资历范围）请拒绝投递；
 - reason 一句话说明筛选理由（2-3 个要点，逗号分隔）；
 - suggestion 一句可执行的建议。
+${industryRule}
 
 ${JSON_RULE}
 
@@ -263,7 +274,35 @@ ${JSON_RULE}
 候选人基础信息：
 """${resumeToText(resume)}"""
 
-指定用于本简历的项目经历：
+ 指定用于本简历的项目经历：
 """${pickedText}"""`
+  return { system, user }
+}
+
+/** 简历页「AI 生成简历」：全量经历库 + 当前简历 + JD，AI 从库中筛选相关度高/中项目并组装完整简历 */
+export function buildGenerateResumeFromBankPrompt(
+  jobJd: string,
+  items: ExperienceBankItem[],
+  resume: Resume,
+): { system: string; user: string } {
+  const system =
+    '你是一位资深简历撰写专家。针对目标岗位 JD，从候选人的全量个人经历库中挑选最相关（相关度高/中）的项目，结合候选人已有的工作经历与教育经历，组装一份针对性简历。忠于事实，不编造数据，表达按 STAR 法则优化。回答必须用简体中文。'
+  const user = `请针对该岗位生成一份定制简历。
+要求：输出 JSON，格式为 {"summary": string, "skills": string[], "projects": [{"company": string, "name": string, "role": string, "description": string, "points": string[]}]}。
+- summary：结合 JD 与选中项目，用 1-2 句话撰写个人简介/自我评价；
+- skills：基于 JD 与经历库提炼技能列表；
+- projects：从下方个人经历库中挑选 2-4 个最相关（相关度高/中）的项目，按 JD 重要性排序，points 用 STAR 法则润色但不得改变事实；相关度低或无关的项目不要使用。
+- 注意：工作经历、教育经历、姓名电话邮箱等基础信息不要输出，系统会从候选人原简历自动保留。
+
+${JSON_RULE}
+
+岗位 JD：
+"""${jobJd}"""
+
+候选人原简历（工作/教育/基础信息由此继承，仅作背景参考）：
+"""${resumeToText(resume)}"""
+
+个人经历库（全部候选项目）：
+"""${experiencesToText(items)}"""`
   return { system, user }
 }

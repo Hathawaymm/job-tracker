@@ -22,9 +22,10 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 function Shell() {
   const { state, importData } = useApp()
-  const [tab, setTab] = useState<Tab>('bank')
+  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).get('tab') as Tab) || 'bank')
   const [health, setHealth] = useState<{ deepseek: boolean; vision: boolean } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const initialResumeId = new URLSearchParams(window.location.search).get('resumeId') ?? undefined
 
   useEffect(() => {
     healthCheck().then(setHealth).catch(() => setHealth(null))
@@ -89,7 +90,7 @@ function Shell() {
         ))}
       </nav>
       <main>
-        {tab === 'resume' && <ResumePage />}
+        {tab === 'resume' && <ResumePage initialResumeId={initialResumeId} />}
         {tab === 'bank' && <ExperienceBankPage />}
         {tab === 'jobs' && <JobsPage />}
         {tab === 'greeting' && <GreetingPage />}

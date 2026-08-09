@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fitLevelFromScore, getPool, setJobDecision, type PoolJob } from '../../lib/jobsApi'
+import { fitLevelFromScore, getPool, getTasks, setJobDecision, type PoolJob } from '../../lib/jobsApi'
 
 interface Props {
   onConfirm: (job: PoolJob) => Promise<void>
@@ -18,12 +18,19 @@ function fitLabel(score: number): string {
 export default function PoolList({ onConfirm, refreshKey }: Props) {
   const [pool, setPool] = useState<PoolJob[] | null>(null)
   const [err, setErr] = useState('')
+  const [threshold, setThreshold] = useState(65)
+
+  useEffect(() => {
+    getTasks()
+      .then((t) => setThreshold(t.config.threshold ?? 65))
+      .catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     try {
       setPool(await getPool())
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '加载待投递池失败')
+      setErr(e instanceof Error ? e.message : '加载待确认池失败')
       setPool([])
     }
   }, [])
@@ -53,7 +60,7 @@ export default function PoolList({ onConfirm, refreshKey }: Props) {
   if (pool === null) {
     return (
       <div className="panel">
-        <span className="spinner" /> 加载待投递池…
+        <span className="spinner" /> 加载待确认池…
       </div>
     )
   }
@@ -61,11 +68,11 @@ export default function PoolList({ onConfirm, refreshKey }: Props) {
   if (pool.length === 0) {
     return (
       <div className="panel">
-        <h3>待投递池（AI 推荐）</h3>
+        <h3>待确认池（AI 推荐）</h3>
         <div className="empty">
           暂无 AI 推荐的岗位。
           <br />
-          配置搜索条件后点「立即抓取」或开启定时抓取，匹配度 ≥65% 的岗位会出现在这里。
+          配置搜索条件后点「立即抓取」或开启定时抓取，匹配度达阈值的岗位会出现在这里，确认后进入投递清单。
         </div>
       </div>
     )
@@ -73,7 +80,7 @@ export default function PoolList({ onConfirm, refreshKey }: Props) {
 
   return (
     <div className="panel">
-      <h3>待投递池（AI 推荐 · 匹配度 ≥65% · {pool.length} 条）</h3>
+      <h3>待确认池（AI 推荐 · 匹配度 {threshold}% · {pool.length} 条）</h3>
       {err && <div className="error-box">{err}</div>}
       {pool.map((job) => (
         <div key={job.id} className="card" style={{ marginBottom: 10 }}>

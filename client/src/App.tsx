@@ -12,7 +12,7 @@ import InterviewPage from './features/interview/InterviewPage'
 type Tab = 'resume' | 'bank' | 'jobs' | 'greeting' | 'pipeline' | 'interview'
 
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'bank', label: '经历库' },
+  { key: 'bank', label: '个人经历库' },
   { key: 'resume', label: '简历' },
   { key: 'jobs', label: '岗位库' },
   { key: 'greeting', label: '招呼语' },

@@ -288,8 +288,25 @@ CREATE TABLE IF NOT EXISTS experience_bank (
 )
 `)
 
+// 兼容旧表：经历库扩展为多类型（project/work/edu/profile），缺列时补列
+ensureColumn('experience_bank', 'type', "type TEXT NOT NULL DEFAULT 'project'")
+ensureColumn('experience_bank', 'school', "school TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'major', "major TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'degree', "degree TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'highlights_json', "highlights_json TEXT DEFAULT '[]'")
+// profile 类型专用列（与 Resume 字段同名，直接对齐）
+ensureColumn('experience_bank', 'title', "title TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'city', "city TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'phone', "phone TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'email', "email TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'summary', "summary TEXT DEFAULT ''")
+ensureColumn('experience_bank', 'skills_json', "skills_json TEXT DEFAULT '[]'")
+
+export type ExperienceType = 'project' | 'work' | 'edu' | 'profile'
+
 export interface ExperienceItem {
   id: number
+  type: ExperienceType
   company: string
   name: string
   role: string
@@ -297,6 +314,16 @@ export interface ExperienceItem {
   description: string
   points: string[]
   tags: string[]
+  school: string
+  major: string
+  degree: string
+  highlights: string[]
+  title: string
+  city: string
+  phone: string
+  email: string
+  summary: string
+  skills: string[]
   createdAt: string
   updatedAt: string
 }
@@ -306,6 +333,7 @@ export type ExperienceInput = Omit<ExperienceItem, 'id' | 'createdAt' | 'updated
 function rowToExperience(row: Record<string, unknown>): ExperienceItem {
   return {
     id: row.id as number,
+    type: ((row.type as string) || 'project') as ExperienceType,
     company: (row.company as string) ?? '',
     name: row.name as string,
     role: (row.role as string) ?? '',
@@ -313,6 +341,16 @@ function rowToExperience(row: Record<string, unknown>): ExperienceItem {
     description: (row.description as string) ?? '',
     points: JSON.parse((row.points_json as string) || '[]') as string[],
     tags: JSON.parse((row.tags_json as string) || '[]') as string[],
+    school: (row.school as string) ?? '',
+    major: (row.major as string) ?? '',
+    degree: (row.degree as string) ?? '',
+    highlights: JSON.parse((row.highlights_json as string) || '[]') as string[],
+    title: (row.title as string) ?? '',
+    city: (row.city as string) ?? '',
+    phone: (row.phone as string) ?? '',
+    email: (row.email as string) ?? '',
+    summary: (row.summary as string) ?? '',
+    skills: JSON.parse((row.skills_json as string) || '[]') as string[],
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   }
@@ -327,10 +365,11 @@ export function insertExperience(input: ExperienceInput): ExperienceItem {
   const ts = new Date().toISOString()
   const res = db
     .prepare(
-      `INSERT INTO experience_bank (company, name, role, period, description, points_json, tags_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO experience_bank (type, company, name, role, period, description, points_json, tags_json, school, major, degree, highlights_json, title, city, phone, email, summary, skills_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
+      input.type ?? 'project',
       input.company ?? '',
       input.name,
       input.role ?? '',
@@ -338,6 +377,16 @@ export function insertExperience(input: ExperienceInput): ExperienceItem {
       input.description ?? '',
       JSON.stringify(input.points ?? []),
       JSON.stringify(input.tags ?? []),
+      input.school ?? '',
+      input.major ?? '',
+      input.degree ?? '',
+      JSON.stringify(input.highlights ?? []),
+      input.title ?? '',
+      input.city ?? '',
+      input.phone ?? '',
+      input.email ?? '',
+      input.summary ?? '',
+      JSON.stringify(input.skills ?? []),
       ts,
       ts,
     )
@@ -351,8 +400,9 @@ export function updateExperience(id: number, input: ExperienceInput): Experience
   if (!existing) return null
   const ts = new Date().toISOString()
   db.prepare(
-    `UPDATE experience_bank SET company = ?, name = ?, role = ?, period = ?, description = ?, points_json = ?, tags_json = ?, updated_at = ? WHERE id = ?`,
+    `UPDATE experience_bank SET type = ?, company = ?, name = ?, role = ?, period = ?, description = ?, points_json = ?, tags_json = ?, school = ?, major = ?, degree = ?, highlights_json = ?, title = ?, city = ?, phone = ?, email = ?, summary = ?, skills_json = ?, updated_at = ? WHERE id = ?`,
   ).run(
+    input.type ?? 'project',
     input.company ?? '',
     input.name,
     input.role ?? '',
@@ -360,6 +410,16 @@ export function updateExperience(id: number, input: ExperienceInput): Experience
     input.description ?? '',
     JSON.stringify(input.points ?? []),
     JSON.stringify(input.tags ?? []),
+    input.school ?? '',
+    input.major ?? '',
+    input.degree ?? '',
+    JSON.stringify(input.highlights ?? []),
+    input.title ?? '',
+    input.city ?? '',
+    input.phone ?? '',
+    input.email ?? '',
+    input.summary ?? '',
+    JSON.stringify(input.skills ?? []),
     ts,
     id,
   )
@@ -370,6 +430,63 @@ export function updateExperience(id: number, input: ExperienceInput): Experience
 export function deleteExperience(id: number): boolean {
   const res = db.prepare('DELETE FROM experience_bank WHERE id = ?').run(id)
   return res.changes > 0
+}
+
+/** 把经历库 4 类条目聚合为一份完整 Resume（SSOT 数据源出口） */
+export function buildResumeFromBank(): {
+  name: string
+  title: string
+  city: string
+  phone: string
+  email: string
+  summary: string
+  skills: string[]
+  experiences: Array<{ company: string; role: string; period: string; highlights: string[] }>
+  education: Array<{ school: string; major: string; degree: string; period: string }>
+  projects: Array<{ company: string; name: string; role: string; period: string; description: string; points: string[] }>
+} {
+  const all = listExperiences()
+  const profile = all
+    .filter((x) => x.type === 'profile')
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]
+  const experiences = all
+    .filter((x) => x.type === 'work')
+    .map((x) => ({
+      company: x.company,
+      role: x.role || x.name,
+      period: x.period,
+      highlights: x.highlights,
+    }))
+  const education = all
+    .filter((x) => x.type === 'edu')
+    .map((x) => ({
+      school: x.name,
+      major: x.major,
+      degree: x.degree,
+      period: x.period,
+    }))
+  const projects = all
+    .filter((x) => x.type === 'project')
+    .map((x) => ({
+      company: x.company,
+      name: x.name,
+      role: x.role,
+      period: x.period,
+      description: x.description,
+      points: x.points,
+    }))
+  return {
+    name: profile?.name ?? '',
+    title: profile?.title ?? '',
+    city: profile?.city ?? '',
+    phone: profile?.phone ?? '',
+    email: profile?.email ?? '',
+    summary: profile?.summary ?? '',
+    skills: profile?.skills ?? [],
+    experiences,
+    education,
+    projects,
+  }
 }
 
 // ---- 抓取技术日志 ----
@@ -433,4 +550,27 @@ export interface CrawlLogRow {
   status: string
   error: string
   duration_ms: number | null
+}
+
+// ---- 前端业务数据持久化（app_state 键值对，value 存 JSON）----
+// 覆盖：resumes / jobs / interviews / logs —— 前端 SPA 的整块业务数据
+db.exec(`
+CREATE TABLE IF NOT EXISTS app_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
+`)
+
+export function getAppState(key: string): string | null {
+  const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string } | undefined
+  return row?.value ?? null
+}
+
+export function setAppState(key: string, value: string): void {
+  const ts = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(key, value, ts)
 }

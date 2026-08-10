@@ -129,20 +129,7 @@ export interface Education {
   period: string
 }
 
-// ---- 个人经历库（server SQLite 持久化）----
-export interface ExperienceItem {
-  id: number
-  company: string
-  name: string
-  role: string
-  period: string
-  description: string
-  points: string[]
-  tags: string[]
-  createdAt: string
-  updatedAt: string
-}
-
+// ---- 简历 ----
 export interface Resume {
   name: string
   title: string

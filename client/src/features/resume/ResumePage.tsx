@@ -5,7 +5,7 @@ import { importResumeFile, detectResumeFileType } from '../../lib/resumeImport'
 import { mergeExtractedResume, type DiagnoseResult } from '../../lib/scoring'
 import { emptyResume, saveResumes } from '../../lib/storage'
 import type { Resume, ResumeVersion } from '../../types'
-import { getExperiences } from '../../lib/jobsApi'
+import { getExperiences, getResumeFromBank, saveAppState } from '../../lib/jobsApi'
 import ResumeForm from './ResumeForm'
 import ResumePreview from './ResumePreview'
 import JdPickerModal from '../../components/JdPickerModal'
@@ -54,9 +54,15 @@ export default function ResumePage({ initialResumeId }: { initialResumeId?: stri
     return name === null ? null : name.trim() || '未命名版本'
   }
 
-  const handleSave = () => {
-    const ok = saveResumes(state.resumes)
-    showToast(ok ? 'ok' : 'err', ok ? '保存成功 🏅' : '保存失败 ☹️ 请再试一次')
+  const handleSave = async () => {
+    try {
+      await saveAppState(state)
+      saveResumes(state.resumes)
+      showToast('ok', '保存成功 🏅')
+    } catch {
+      saveResumes(state.resumes)
+      showToast('ok', '已保存到本地')
+    }
   }
 
   const handleNew = () => {
@@ -159,11 +165,12 @@ export default function ResumePage({ initialResumeId }: { initialResumeId?: stri
     try {
       const items = await getExperiences()
       if (items.length === 0) {
-        setError('个人经历库为空，请先到「经历库」页录入项目经历')
+        setError('个人经历库为空，请先到「个人经历库」页录入项目经历')
         return
       }
-      const ext = await generateResumeFromBank(jd, items, current.resume)
-      const merged = mergeExtractedResume(current.resume, ext)
+      const bankResume = await getResumeFromBank()
+      const ext = await generateResumeFromBank(jd, items, bankResume)
+      const merged = mergeExtractedResume(bankResume, ext)
       const base = src.company && src.title ? `${src.title}-${src.company}` : src.title || '粘贴JD'
       const name = `AI-${base}-${new Date().toISOString().slice(0, 10)}`
       const id = addResumeVersion(name, merged)
@@ -214,8 +221,8 @@ export default function ResumePage({ initialResumeId }: { initialResumeId?: stri
           <button className="primary" disabled={busy !== ''} onClick={handleSave}>
             💾 保存简历
           </button>
-          <button className="ghost" disabled={!current} onClick={() => current && setPreview(current)}>
-            👁 预览
+          <button className="ghost" disabled={!current} title="导出当前简历版本为 Markdown / Word / PDF" onClick={() => current && setPreview(current)}>
+            📄 导出
           </button>
           <button className="ghost" disabled={busy === 'diagnose'} onClick={() => void handleDiagnose()}>
             {busy === 'diagnose' ? <><span className="spinner" /> 诊断中…</> : '🔍 AI 诊断'}

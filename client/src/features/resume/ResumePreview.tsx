@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import html2canvas from 'html2canvas'
-import { AlignmentType, Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
+import { useState } from 'react'
 import type { Resume, ResumeVersion } from '../../types'
+import { exportResumeDoc, type DocFormat } from '../../lib/exportDoc'
 
 interface Props {
   version: ResumeVersion
@@ -98,129 +97,19 @@ function ResumeSheet({ resume }: { resume: Resume }) {
 }
 
 export default function ResumePreview({ version, onClose }: Props) {
-  const sheetRef = useRef<HTMLDivElement>(null)
+  const [format, setFormat] = useState<DocFormat>('md')
   const [exporting, setExporting] = useState(false)
+  const [error, setError] = useState('')
   const resume = version.resume
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  const exportPng = async () => {
-    if (!sheetRef.current) return
+  const handleConfirm = async () => {
     setExporting(true)
+    setError('')
     try {
-      const canvas = await html2canvas(sheetRef.current, { scale: 2, backgroundColor: '#ffffff' })
-      const a = document.createElement('a')
-      a.href = canvas.toDataURL('image/png')
-      a.download = `${version.name || '简历'}-${new Date().toISOString().slice(0, 10)}.png`
-      a.click()
+      await exportResumeDoc(resume, format, version.name || '简历')
+      onClose()
     } catch (err) {
-      alert(`导出图片失败：${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  const exportPdf = () => {
-    window.print()
-  }
-
-  const exportDocx = async () => {
-    setExporting(true)
-    try {
-      const children: Paragraph[] = []
-
-      // 标题区
-      children.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          heading: HeadingLevel.HEADING_1,
-          children: [new TextRun({ text: resume.name || '未命名', bold: true })],
-        }),
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          children: [new TextRun({ text: resume.title || '求职意向：待填写' })],
-        }),
-      )
-      const contact = [resume.city, resume.phone, resume.email].filter(Boolean).join('  ·  ')
-      if (contact) {
-        children.push(
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 200 },
-            children: [new TextRun({ text: contact })],
-          }),
-        )
-      }
-
-      // 小节
-      const section = (title: string, body: Paragraph[]) => {
-        children.push(
-          new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 240 }, children: [new TextRun({ text: title, bold: true })] }),
-          ...body,
-        )
-      }
-      const bullet = (text: string) =>
-        new Paragraph({
-          bullet: { level: 0 },
-          children: [new TextRun({ text })],
-        })
-      const itemHead = (left: string, right: string) =>
-        new Paragraph({
-          spacing: { before: 120 },
-          children: [
-            new TextRun({ text: left, bold: true }),
-            right ? new TextRun({ text: `\t${right}` }) : new TextRun(''),
-          ],
-        })
-
-      if (resume.summary) {
-        section('个人简介', [new Paragraph({ children: [new TextRun({ text: resume.summary })] })])
-      }
-      if (resume.skills.length > 0) {
-        section('技能', [new Paragraph({ children: [new TextRun({ text: resume.skills.join(' · ') })] })])
-      }
-      if (resume.experiences.length > 0) {
-        const body: Paragraph[] = []
-        for (const e of resume.experiences) {
-          body.push(itemHead(`${e.company}｜${e.role}`, e.period))
-          for (const h of e.highlights.filter(Boolean)) body.push(bullet(h))
-        }
-        section('工作经历', body)
-      }
-      if (resume.projects.length > 0) {
-        const body: Paragraph[] = []
-        for (const p of resume.projects) {
-          body.push(itemHead([p.company, p.name].filter(Boolean).join(' · ') + (p.role ? `｜${p.role}` : ''), ''))
-          if (p.description) body.push(new Paragraph({ children: [new TextRun({ text: p.description })] }))
-          for (const pt of p.points.filter(Boolean)) body.push(bullet(pt))
-        }
-        section('项目经历', body)
-      }
-      if (resume.education.length > 0) {
-        const body: Paragraph[] = []
-        for (const e of resume.education) {
-          body.push(itemHead(`${e.school}｜${e.major}｜${e.degree}`, e.period))
-        }
-        section('教育经历', body)
-      }
-
-      const doc = new Document({
-        sections: [{ properties: {}, children }],
-      })
-      const blob = await Packer.toBlob(doc)
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `${version.name || '简历'}-${new Date().toISOString().slice(0, 10)}.docx`
-      a.click()
-      URL.revokeObjectURL(a.href)
-    } catch (err) {
-      alert(`导出 Word 失败：${err instanceof Error ? err.message : String(err)}`)
+      setError(err instanceof Error ? err.message : '导出失败')
     } finally {
       setExporting(false)
     }
@@ -230,23 +119,23 @@ export default function ResumePreview({ version, onClose }: Props) {
     <div className="preview-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="preview-toolbar">
         <b>{version.name}</b>
-        <span className="muted small">预览 · ESC 关闭</span>
+        <span className="muted small">导出确认 · ESC 关闭</span>
         <span style={{ flex: 1 }} />
-        <button className="primary small" disabled={exporting} onClick={() => void exportPng()}>
-          {exporting ? '导出中…' : '🖼 导出图片'}
+        <select value={format} onChange={(e) => setFormat(e.target.value as DocFormat)} style={{ width: 'auto' }} disabled={exporting}>
+          <option value="md">Markdown</option>
+          <option value="docx">Word</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button className="primary small" disabled={exporting} onClick={() => void handleConfirm()}>
+          {exporting ? <><span className="spinner" /> 导出中…</> : '✅ 确认导出'}
         </button>
-        <button className="ghost small" disabled={exporting} onClick={() => void exportDocx()}>
-          📝 导出 Word
-        </button>
-        <button className="ghost small" onClick={exportPdf}>
-          📄 导出 PDF
-        </button>
-        <button className="ghost small" onClick={onClose}>
-          ✕ 关闭
+        <button className="ghost small" disabled={exporting} onClick={onClose}>
+          ✕ 取消
         </button>
       </div>
+      {error && <div className="error-box" style={{ margin: 8 }}>{error}</div>}
       <div className="preview-scroll">
-        <div className="preview-sheet" ref={sheetRef}>
+        <div className="preview-sheet">
           <ResumeSheet resume={resume} />
         </div>
       </div>

@@ -2,7 +2,8 @@ import express from 'express'
 import cors from 'cors'
 import { getCredentials } from './keys.js'
 import { DEFAULT_TASK_CONFIG, batchFindExistingKeys, findPoolJobs, getJobById, getTask, getTaskConfig, recentRuns, setDecision, updateTask } from './db.js'
-import { deleteExperience, insertExperience, listExperiences, updateExperience } from './db.js'
+import { deleteExperience, insertExperience, listExperiences, updateExperience, buildResumeFromBank } from './db.js'
+import { getAppState, setAppState } from './db.js'
 import { fetchJobByUrl, runCrawl, type RunResult } from './crawler.js'
 import { startScheduler } from './scheduler.js'
 import { completeTask, failTask, getProgress, isExtensionOnline, peekTask, touchHeartbeat } from './ext.js'
@@ -321,6 +322,7 @@ app.post('/api/jobs/batch-check', (req, res) => {
 // ---------------------------------------------------------------------------
 
 interface ExperienceBody {
+  type?: unknown
   company?: unknown
   name?: unknown
   role?: unknown
@@ -328,6 +330,16 @@ interface ExperienceBody {
   description?: unknown
   points?: unknown
   tags?: unknown
+  school?: unknown
+  major?: unknown
+  degree?: unknown
+  highlights?: unknown
+  title?: unknown
+  city?: unknown
+  phone?: unknown
+  email?: unknown
+  summary?: unknown
+  skills?: unknown
 }
 
 function parseExperienceBody(body: ExperienceBody): { name: string; fields: Omit<ExperienceItemInput, 'name'> } | null {
@@ -335,17 +347,31 @@ function parseExperienceBody(body: ExperienceBody): { name: string; fields: Omit
   return {
     name: body.name.trim(),
     fields: {
+      type: ['project', 'work', 'edu', 'profile'].includes(String(body.type))
+        ? (body.type as ExperienceItemInput['type'])
+        : 'project',
       company: typeof body.company === 'string' ? body.company : '',
       role: typeof body.role === 'string' ? body.role : '',
       period: typeof body.period === 'string' ? body.period : '',
       description: typeof body.description === 'string' ? body.description : '',
       points: Array.isArray(body.points) ? (body.points as string[]) : [],
       tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
+      school: typeof body.school === 'string' ? body.school : '',
+      major: typeof body.major === 'string' ? body.major : '',
+      degree: typeof body.degree === 'string' ? body.degree : '',
+      highlights: Array.isArray(body.highlights) ? (body.highlights as string[]) : [],
+      title: typeof body.title === 'string' ? body.title : '',
+      city: typeof body.city === 'string' ? body.city : '',
+      phone: typeof body.phone === 'string' ? body.phone : '',
+      email: typeof body.email === 'string' ? body.email : '',
+      summary: typeof body.summary === 'string' ? body.summary : '',
+      skills: Array.isArray(body.skills) ? (body.skills as string[]) : [],
     },
   }
 }
 
 interface ExperienceItemInput {
+  type: 'project' | 'work' | 'edu' | 'profile'
   company: string
   name: string
   role: string
@@ -353,10 +379,27 @@ interface ExperienceItemInput {
   description: string
   points: string[]
   tags: string[]
+  school: string
+  major: string
+  degree: string
+  highlights: string[]
+  title: string
+  city: string
+  phone: string
+  email: string
+  summary: string
+  skills: string[]
 }
 
-app.get('/api/experiences', (_req, res) => {
-  res.json({ items: listExperiences() })
+app.get('/api/experiences', (req, res) => {
+  const type = typeof req.query.type === 'string' ? req.query.type : ''
+  const items = listExperiences()
+  res.json({ items: type ? items.filter((x) => x.type === type) : items })
+})
+
+// SSOT 聚合：经历库 4 类条目 → 完整 Resume（AI 生成简历的数据源）
+app.get('/api/experiences/resume', (_req, res) => {
+  res.json({ resume: buildResumeFromBank() })
 })
 
 app.post('/api/experiences', (req, res) => {
@@ -387,6 +430,39 @@ app.put('/api/experiences/:id', (req, res) => {
 app.delete('/api/experiences/:id', (req, res) => {
   const ok = deleteExperience(Number(req.params.id))
   res.json({ ok })
+})
+
+// ---------------------------------------------------------------------------
+// 前端业务数据持久化（app_state 键值对）：resumes / jobs / interviews / logs
+// ---------------------------------------------------------------------------
+
+const APP_STATE_KEYS = ['resumes', 'jobs', 'interviews', 'logs'] as const
+
+app.get('/api/app-state', (_req, res) => {
+  const data: Record<string, unknown> = {}
+  for (const k of APP_STATE_KEYS) {
+    const raw = getAppState(k)
+    if (raw !== null) {
+      try {
+        data[k] = JSON.parse(raw)
+      } catch {
+        data[k] = []
+      }
+    } else {
+      data[k] = []
+    }
+  }
+  res.json(data)
+})
+
+app.put('/api/app-state', (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  for (const k of APP_STATE_KEYS) {
+    if (k in body) {
+      setAppState(k, JSON.stringify(body[k] ?? []))
+    }
+  }
+  res.json({ ok: true })
 })
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,10 @@
 | 14 | 简历页「AI 生成简历」 | `buildGenerateResumeFromBankPrompt` + `generateResumeFromBank`（全量经历库项目 + 当前简历 + JD）；`JdPickerModal` 选 JD（岗位库优先 + 粘贴兜底）；merge 时工作/教育/基础信息自动继承当前简历 | prompts 单测 2 项 |
 | 15 | 针对性简历跳转 | 生成成功后显示「查看已生成的简历」链接 → `?tab=resume&resumeId=`；`App` 读 URL 初始化 tab + `ResumePage initialResumeId`；命名 `AI-岗位-公司` | 浏览器实测 |
 | 16 | 已确认待投递 + 待确认池 | `APPLICATION_STAGE_LABELS.confirmed` 改「已确认待投递」；`PoolList` 标题「待投递池」→「待确认池」（阈值动态显示）；确认文案统一 | 浏览器实测 |
+| 17 | 经历库 SSOT | 经历库成为简历数据单一事实来源：`experience_bank` 加 `type` 列（project/work/edu/profile）+ profile 专用列；新增聚合接口 `GET /api/experiences/resume`（4 类条目→完整 Resume）；简历页「AI 生成简历」与岗位库「针对性简历」的 base 改从聚合接口读取，不再依赖当前简历；`experiencesToText` 只取 project 类型防污染；迁移脚本 `server/src/scripts/migrate-bank.ts`（适配 v2 备份格式 `{data:{resumes}}`，取 updatedAt 最新版本，写 work/edu/profile） | typecheck + 96 测试 + 浏览器实测 |
+| 18 | 经历库 UI 对齐简历页 | 经历库页复用简历页四区块布局（基本信息→工作经历→项目经历→教育经历同屏），删除 tab 切换；每区块「+ 添加」收起/展开表单 + 就地编辑；项目经历全量展示；「经历库」改名「个人经历库」；`normalizeInput` 无 `type` 字段时按字段特征智能推断（school/major/degree→edu、highlights→work、phone/email/summary→profile、否则 project），修复导入进错分区 | typecheck + 96 测试 + 浏览器实测 + infer 5 用例 |
+| 19 | 前端业务数据入库 SQLite | `app_state` 键值表（key/value JSON）持久化前端业务数据（resumes/jobs/interviews/logs）；`GET/PUT /api/app-state` 整体读写；`useAppState` 初始化先拉 server（空则自动迁移 localStorage 存量），state 变化 800ms 防抖 PUT；server 不可用降级 localStorage 兜底；「使用简历」记忆 `resumeSel:*` 仍留 localStorage | appState 单测 + 浏览器实测（改简历城市 2 秒内 SQLite 自动更新；误覆盖后从 localStorage 恢复成功） |
+| 20 | 简历/经历库文档导出 | 新增 `exportDoc.ts`（`resumeToMarkdown` 纯字符串 + docx 库 Word + window.print PDF + `exportResumeDoc` 按格式分发）；经历库页顶部加「💾 保存」+ 格式下拉 +「📄 导出」（导出 4 类全部）；简历页「👁 预览」改「📄 导出」，弹层改格式下拉 +「✅ 确认导出」/「✕ 取消」，移除导出图片；所有保存按钮 toast 统一「保存成功 🏅」，就地编辑静默 | exportDoc 3 单测 + typecheck + 浏览器实测（md/Word 导出、取消不导出、保存 toast） |
 
 ---
 
@@ -98,6 +102,13 @@
 - **根因**：回填 `unique_key` 的 `UPDATE` 因**已存在的 UNIQUE 索引**（partial 索引 `WHERE unique_key IS NOT NULL`）在遇到重复 external_id 时抛 `UNIQUE constraint failed`，导致回填未完成、unique_key 仍全为 NULL；随后 `DELETE WHERE id NOT IN (SELECT MAX(id) ... GROUP BY unique_key)` 把**所有 NULL 归为一组**，只保留 MAX(id) 一条，其余全删。两步中间未检查状态。
 - **修复/教训**：①回填前必须先处理重复（或先删 UNIQUE 索引，回填+删重后再建）；②`GROUP BY` 在列全为 NULL 时会把所有行归一组，`NOT IN` 删除语句极危险；③对生产数据执行破坏性 SQL 前**必须先备份**（`sqlite3 db ".backup backup.db"`）；④CLI 会话与运行中 server 并发写 DB 时，WAL 状态不可预期。
 - **验证**：已清空剩余脏数据（"居家打字员"非目标岗位），岗位库需重新抓取恢复；crawl_logs 历史保留。
+
+### 9. 经历库迁移脚本去重键（type|name 会把不同公司的同职位合并）
+
+- **现象**：`migrate-bank.ts` 用 `type|name` 判重，两条不同公司的「项目经理」工作经历被当作重复只导入 1 条。
+- **根因**：work 类型把职位名存进 `name` 列，跨公司同职位 name 相同 → 幂等键误判。
+- **修复**：`insert()` 支持自定义去重键——work 用 `work|company|role`，edu 用 `edu|school|major`，profile 用 `profile|姓名`。
+- **验证**：修正后两条工作经历均导入，聚合接口返回完整 2 条。教训：迁移脚本去重键必须按业务语义（公司+职位/学校+专业），不能套用统一字段。
 
 ---
 

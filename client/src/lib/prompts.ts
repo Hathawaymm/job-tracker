@@ -190,6 +190,7 @@ export function buildInterviewSystemPrompt(resume: Resume): string {
 
 export interface ExperienceBankItem {
   id: number
+  type: string
   company: string
   name: string
   role: string
@@ -199,9 +200,10 @@ export interface ExperienceBankItem {
   tags: string[]
 }
 
-/** 把经历库条目序列化为文本，供提示词使用 */
+/** 把经历库条目序列化为文本，供提示词使用（只取 project 类型，避免工作/教育/基本信息混入项目候选） */
 export function experiencesToText(items: ExperienceBankItem[]): string {
   return items
+    .filter((p) => p.type === 'project')
     .map((p, i) => {
       const lines = [`${i + 1}. [id=${p.id}] ${p.company ? `${p.company}｜` : ''}${p.name}｜${p.role}（${p.period}）`]
       if (p.tags.length > 0) lines.push(`   标签：${p.tags.join('、')}`)

@@ -1,3 +1,5 @@
+import type { AppData, Resume } from '../types'
+
 export interface TaskConfigPayload {
   keyword: string
   city: string
@@ -160,8 +162,11 @@ export function fitLevelFromScore(score: number): FitLevel {
 }
 
 // ---- 个人经历库（server SQLite 持久化）----
+export type ExperienceType = 'project' | 'work' | 'edu' | 'profile'
+
 export interface ExperienceItem {
   id: number
+  type: ExperienceType
   company: string
   name: string
   role: string
@@ -169,14 +174,25 @@ export interface ExperienceItem {
   description: string
   points: string[]
   tags: string[]
+  school: string
+  major: string
+  degree: string
+  highlights: string[]
+  title: string
+  city: string
+  phone: string
+  email: string
+  summary: string
+  skills: string[]
   createdAt: string
   updatedAt: string
 }
 
 export type ExperienceInput = Omit<ExperienceItem, 'id' | 'createdAt' | 'updatedAt'>
 
-export async function getExperiences(): Promise<ExperienceItem[]> {
-  const data = await request<{ items: ExperienceItem[] }>('/api/experiences')
+export async function getExperiences(type?: ExperienceType): Promise<ExperienceItem[]> {
+  const qs = type ? `?type=${type}` : ''
+  const data = await request<{ items: ExperienceItem[] }>(`/api/experiences${qs}`)
   return data.items
 }
 
@@ -199,4 +215,22 @@ export async function updateExperience(id: number, input: ExperienceInput): Prom
 export async function deleteExperience(id: number): Promise<boolean> {
   const data = await request<{ ok: boolean }>(`/api/experiences/${id}`, { method: 'DELETE' })
   return data.ok
+}
+
+/** SSOT 聚合：经历库 4 类条目 → 完整 Resume（AI 生成简历的数据源） */
+export async function getResumeFromBank(): Promise<Resume> {
+  const data = await request<{ resume: Resume }>('/api/experiences/resume')
+  return data.resume
+}
+
+// ---- 前端业务数据持久化（server SQLite app_state）----
+
+/** 拉取前端业务数据（resumes/jobs/interviews/logs） */
+export async function getAppState(): Promise<AppData> {
+  return request<AppData>('/api/app-state')
+}
+
+/** 整体保存前端业务数据 */
+export async function saveAppState(data: AppData): Promise<void> {
+  await request<{ ok: boolean }>('/api/app-state', { method: 'PUT', body: JSON.stringify(data) })
 }

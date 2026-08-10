@@ -5,7 +5,7 @@ import { findDuplicateJob } from '../../lib/dedupe'
 import { makeJob } from '../../lib/storage'
 import { nowIso } from '../../lib/id'
 import { mergeExtractedResume } from '../../lib/scoring'
-import { fitLevelFromScore, getExperiences, getTasks, manualFetchJob, setJobDecision, type PoolJob } from '../../lib/jobsApi'
+import { fitLevelFromScore, getExperiences, getResumeFromBank, getTasks, manualFetchJob, setJobDecision, type PoolJob } from '../../lib/jobsApi'
 import type { Job } from '../../types'
 import { ResumePicker, useResumeSelection } from '../../components/ResumePicker'
 import JobEditor from './JobEditor'
@@ -174,17 +174,18 @@ export default function JobsPage() {
     try {
       const items = await getExperiences()
       if (items.length === 0) {
-        setError('个人经历库为空，请先到「经历库」页录入项目经历')
+        setError('个人经历库为空，请先到「个人经历库」页录入项目经历')
         return
       }
-      const picked = await pickProjectsForJob(job.jdText, items, resume)
+      const base = await getResumeFromBank()
+      const picked = await pickProjectsForJob(job.jdText, items, base)
       const valid = picked.selected.filter((p) => items.some((it) => it.id === p.id))
       if (valid.length === 0) {
         setError('AI 未从经历库中选中任何项目，请重试或检查经历库')
         return
       }
-      const ext = await composeResumeForJob(job.jdText, valid, items, resume)
-      const composed = mergeExtractedResume(resume, ext)
+      const ext = await composeResumeForJob(job.jdText, valid, items, base)
+      const composed = mergeExtractedResume(base, ext)
       const name = `AI-${job.title}-${job.company}`
       const newId = addResumeVersion(name, composed)
       addLog(job, '生成针对性简历', `选用 ${valid.length} 个项目 → 版本「${name}」`)

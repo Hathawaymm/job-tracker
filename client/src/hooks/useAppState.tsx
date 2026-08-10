@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useReducer, useRef, type ReactNode } from 'react'
 import type { AppData, InterviewRecord, Job, LogEntry, Resume, ResumeVersion } from '../types'
 import { emptyData, emptyResume, loadAll, makeResumeVersion, saveNonResume } from '../lib/storage'
+import { getAppState, saveAppState } from '../lib/jobsApi'
 import { nowIso, uid } from '../lib/id'
 
 interface AppApi {
@@ -83,9 +84,47 @@ const AppContext = createContext<AppApi | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, () => loadAll())
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const synced = useRef(false)
 
+  // 初始化：尝试从 server 拉取业务数据；server 为空时把 localStorage 存量自动迁移上去
+  useEffect(() => {
+    void (async () => {
+      try {
+        const remote = await getAppState()
+        const remoteEmpty =
+          remote.resumes.length === 0 &&
+          remote.jobs.length === 0 &&
+          remote.interviews.length === 0 &&
+          remote.logs.length === 0
+        if (remoteEmpty) {
+          // 首次迁移：把本地存量写上去
+          const local = loadAll()
+          await saveAppState(local)
+        } else {
+          dispatch({ type: 'import', data: remote })
+        }
+      } catch {
+        // server 不可用：保持 localStorage 数据（本地兜底）
+      } finally {
+        synced.current = true
+      }
+    })()
+    return () => {
+      if (syncTimer.current) clearTimeout(syncTimer.current)
+    }
+  }, [])
+
+  // state 变化：800ms 防抖同步到 server + 写 localStorage 兜底缓存
   useEffect(() => {
     saveNonResume(state)
+    if (!synced.current) return
+    if (syncTimer.current) clearTimeout(syncTimer.current)
+    syncTimer.current = setTimeout(() => {
+      void saveAppState(state).catch(() => {
+        // server 不可用：静默降级，localStorage 已兜底
+      })
+    }, 800)
   }, [state])
 
   const api: AppApi = {

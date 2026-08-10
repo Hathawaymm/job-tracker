@@ -13,3 +13,6 @@ extension/.output/
 extension/.wxt/
 extension/install-this/
 项目经历库.docx
+
+# 用户数据备份（含个人简历/岗位信息，勿入库）
+job-tracker-backup.json

@@ -107,7 +107,7 @@ describe('buildResumeExtractPrompt', () => {
 
 describe('experiencesToText', () => {
   const items = [
-    { id: 1, company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链', 'EDI'] },
+    { id: 1, type: 'project', company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链', 'EDI'] },
   ]
   it('序列化出完整条目含 id', () => {
     const text = experiencesToText(items)
@@ -118,7 +118,7 @@ describe('experiencesToText', () => {
 })
 
 describe('buildPickProjectsPrompt / buildComposeResumePrompt', () => {
-  const items = [{ id: 1, company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链'] }]
+  const items = [{ id: 1, type: 'project', company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链'] }]
   it('挑选提示词包含 JD 与经历库', () => {
     const { system, user } = buildPickProjectsPrompt('需要供应链经验', items, sampleResume())
     expect(system).toContain('2-4 个项目')
@@ -134,7 +134,7 @@ describe('buildPickProjectsPrompt / buildComposeResumePrompt', () => {
 })
 
 describe('buildGenerateResumeFromBankPrompt', () => {
-  const items = [{ id: 1, company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链'] }]
+  const items = [{ id: 1, type: 'project', company: '路特', name: 'EDI 对接', role: '项目经理', period: '2025', description: '供应链自动化', points: ['对接 5 家 KA 客户'], tags: ['供应链'] }]
   it('包含 JD、全量经历库与原简历', () => {
     const { system, user } = buildGenerateResumeFromBankPrompt('需要供应链经验', items, sampleResume())
     expect(system).toContain('全量个人经历库')

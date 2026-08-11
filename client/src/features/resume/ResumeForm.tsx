@@ -1,10 +1,20 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import type { Education, Project, Resume, WorkExperience } from '../../types'
 import { starPolish } from '../../lib/ai'
 import { uid } from '../../lib/id'
 import EditableField from '../../components/EditableField'
 import ExperiencePickerModal from '../../components/ExperiencePickerModal'
+import { useDragSort } from '../../hooks/useDragSort'
 import type { ExperienceItem } from '../../lib/jobsApi'
+
+/** 拖拽把手：仅把手可拖，避免干扰点击编辑 */
+function Grip({ gripProps }: { gripProps: Record<string, unknown> }) {
+  return (
+    <span className="grip" title="拖动排序" {...gripProps}>
+      ⠿
+    </span>
+  )
+}
 
 interface Props {
   resume: Resume
@@ -20,6 +30,19 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
   const [polishing, setPolishing] = useState<string | null>(null)
   const [polishBackup, setPolishBackup] = useState<{ projectId: string; points: string[] } | null>(null)
   const [pickerFor, setPickerFor] = useState<string | null>(null)
+
+  const readonly = disabled ?? false
+
+  const expSort = useDragSort<WorkExperience>({
+    items: resume.experiences,
+    onReorder: (next) => set({ experiences: next }),
+    disabled: readonly,
+  })
+  const projSort = useDragSort<Project>({
+    items: resume.projects,
+    onReorder: (next) => set({ projects: next }),
+    disabled: readonly,
+  })
 
   const set = (patch: Partial<Resume>) => onChange({ ...resume, ...patch })
 
@@ -82,7 +105,14 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
     setPickerFor(null)
   }
 
-  const readonly = disabled ?? false
+  /** 拖拽中/悬停时的卡片样式 */
+  const cardStyle = (dragging: boolean, indicator: 'before' | 'after' | null) => {
+    const style: CSSProperties = { marginBottom: 12 }
+    if (dragging) style.opacity = 0.4
+    if (indicator === 'before') style.borderTop = '3px solid var(--accent, #6366f1)'
+    if (indicator === 'after') style.borderBottom = '3px solid var(--accent, #6366f1)'
+    return style
+  }
 
   return (
     <div className="grid" style={{ gap: 16 }}>
@@ -136,8 +166,15 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
           <button className="ghost small" disabled={readonly} onClick={addExp}>+ 添加</button>
         </div>
         {resume.experiences.length === 0 && <p className="muted small">暂无工作经历，可留空（应届生可只填项目经历）</p>}
-        {resume.experiences.map((exp) => (
-          <div key={exp.id} className="card" style={{ marginBottom: 12 }}>
+        {resume.experiences.map((exp) => {
+          const cp = expSort.cardProps(exp)
+          return (
+          <div
+            key={exp.id}
+            className="card"
+            style={cardStyle(expSort.isDragging(exp.id), expSort.dropIndicator(exp.id))}
+            {...cp}
+          >
             <div className="row">
               <div className="field">
                 <label>公司</label>
@@ -152,13 +189,14 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
                 <EditableField value={exp.period} disabled={readonly} placeholder="2022.06 - 至今" onChange={(v) => updateExp(exp.id, { period: v })} />
               </div>
               {!readonly && (
-                <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-end', marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-end', marginBottom: 12, alignItems: 'center' }}>
                   <button
                     className="danger small"
                     onClick={() => { if (confirm('确定删除这条工作经历？')) set({ experiences: resume.experiences.filter((x) => x.id !== exp.id) }) }}
                   >
                     删除
                   </button>
+                  <Grip gripProps={expSort.gripProps(exp)} />
                 </div>
               )}
             </div>
@@ -172,7 +210,8 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
               />
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* 项目经历：每条字段点击即编辑 + 润色回退 */}
@@ -184,8 +223,15 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
             <button className="ghost small" disabled={readonly} onClick={addProject}>+ 添加</button>
           </div>
         </div>
-        {resume.projects.map((p) => (
-          <div key={p.id} className="card" style={{ marginBottom: 12 }}>
+        {resume.projects.map((p) => {
+          const cp = projSort.cardProps(p)
+          return (
+          <div
+            key={p.id}
+            className="card"
+            style={cardStyle(projSort.isDragging(p.id), projSort.dropIndicator(p.id))}
+            {...cp}
+          >
             <div className="row">
               <div className="field">
                 <label>公司</label>
@@ -235,9 +281,11 @@ export default function ResumeForm({ resume, onChange, disabled }: Props) {
               <button className="primary small" disabled={readonly || polishing !== null} onClick={() => void handleStar(p)}>
                 {polishing === p.id ? <><span className="spinner" /> STAR 润色中…</> : '✨ 一键 STAR 润色'}
               </button>
+              {!readonly && <Grip gripProps={projSort.gripProps(p)} />}
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* 教育经历：每条字段点击即编辑 */}

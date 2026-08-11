@@ -301,6 +301,27 @@ ensureColumn('experience_bank', 'phone', "phone TEXT DEFAULT ''")
 ensureColumn('experience_bank', 'email', "email TEXT DEFAULT ''")
 ensureColumn('experience_bank', 'summary', "summary TEXT DEFAULT ''")
 ensureColumn('experience_bank', 'skills_json', "skills_json TEXT DEFAULT '[]'")
+// 用户手动拖拽排序：同 type 内按 sort_order 升序展示
+ensureColumn('experience_bank', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0')
+
+/** 初始化排序：新列刚加（全为 0）时，按旧的 updated_at 倒序赋初始 sort_order（幂等） */
+export function initExperienceSortOrder(): void {
+  const hasOrder = db
+    .prepare('SELECT COUNT(*) AS c FROM experience_bank WHERE sort_order != 0')
+    .get() as { c: number }
+  if (hasOrder.c > 0) return
+  const types = ['project', 'work', 'edu', 'profile'] as const
+  for (const type of types) {
+    const rows = db
+      .prepare('SELECT id FROM experience_bank WHERE type = ? ORDER BY updated_at DESC, id DESC')
+      .all(type) as Array<{ id: number }>
+    const stmt = db.prepare('UPDATE experience_bank SET sort_order = ? WHERE id = ?')
+    const apply = db.transaction(() => {
+      rows.forEach((r, i) => stmt.run(i, r.id))
+    })
+    apply()
+  }
+}
 
 export type ExperienceType = 'project' | 'work' | 'edu' | 'profile'
 
@@ -357,19 +378,23 @@ function rowToExperience(row: Record<string, unknown>): ExperienceItem {
 }
 
 export function listExperiences(): ExperienceItem[] {
-  const rows = db.prepare('SELECT * FROM experience_bank ORDER BY updated_at DESC').all() as Array<Record<string, unknown>>
+  const rows = db.prepare('SELECT * FROM experience_bank ORDER BY sort_order ASC, id ASC').all() as Array<Record<string, unknown>>
   return rows.map(rowToExperience)
 }
 
 export function insertExperience(input: ExperienceInput): ExperienceItem {
   const ts = new Date().toISOString()
+  const type = input.type ?? 'project'
+  const maxOrder = db
+    .prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM experience_bank WHERE type = ?')
+    .get(type) as { m: number }
   const res = db
     .prepare(
-      `INSERT INTO experience_bank (type, company, name, role, period, description, points_json, tags_json, school, major, degree, highlights_json, title, city, phone, email, summary, skills_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO experience_bank (type, company, name, role, period, description, points_json, tags_json, school, major, degree, highlights_json, title, city, phone, email, summary, skills_json, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      input.type ?? 'project',
+      type,
       input.company ?? '',
       input.name,
       input.role ?? '',
@@ -387,6 +412,7 @@ export function insertExperience(input: ExperienceInput): ExperienceItem {
       input.email ?? '',
       input.summary ?? '',
       JSON.stringify(input.skills ?? []),
+      maxOrder.m + 1,
       ts,
       ts,
     )
@@ -430,6 +456,22 @@ export function updateExperience(id: number, input: ExperienceInput): Experience
 export function deleteExperience(id: number): boolean {
   const res = db.prepare('DELETE FROM experience_bank WHERE id = ?').run(id)
   return res.changes > 0
+}
+
+/** 重排某类型经历：ids 为拖拽后的目标顺序，按序赋 sort_order */
+export function reorderExperiences(type: ExperienceType, ids: number[]): boolean {
+  const existing = db
+    .prepare('SELECT id FROM experience_bank WHERE type = ?')
+    .all(type) as Array<{ id: number }>
+  const validIds = existing.map((r) => r.id)
+  const accepted = ids.filter((id) => validIds.includes(id))
+  if (accepted.length !== existing.length || new Set(accepted).size !== accepted.length) return false
+  const stmt = db.prepare('UPDATE experience_bank SET sort_order = ? WHERE id = ?')
+  const apply = db.transaction(() => {
+    accepted.forEach((id, i) => stmt.run(i, id))
+  })
+  apply()
+  return true
 }
 
 /** 把经历库 4 类条目聚合为一份完整 Resume（SSOT 数据源出口） */
@@ -574,3 +616,6 @@ export function setAppState(key: string, value: string): void {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
   ).run(key, value, ts)
 }
+
+// 经历库首次加载时若 sort_order 为新列（全为 0），按旧顺序初始化
+initExperienceSortOrder()

@@ -16,3 +16,11 @@ extension/install-this/
 
 # 用户数据备份（含个人简历/岗位信息，勿入库）
 job-tracker-backup.json
+
+# 导出的简历/经历库文档（含个人隐私，勿入库）
+个人经历库-*.md
+个人经历库-*.docx
+简历-*.md
+简历-*.docx
+*-简历-*.md
+*-简历-*.docx

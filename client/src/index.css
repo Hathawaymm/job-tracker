@@ -203,7 +203,7 @@ button.small {
 
 .row {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -213,21 +213,21 @@ button.small {
 }
 
 .field {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .field label {
   display: block;
   font-size: 12px;
   color: var(--muted);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 input,
 select,
 textarea {
   width: 100%;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
@@ -238,7 +238,7 @@ textarea {
 
 textarea {
   resize: vertical;
-  min-height: 80px;
+  min-height: 56px;
 }
 
 input:focus,
@@ -250,8 +250,8 @@ textarea:focus {
 
 /* ---- 点击即编辑字段：浏览态像印刷的纸，编辑态像可填写的空白 ---- */
 .ef-view {
-  min-height: 30px;
-  padding: 6px 2px;
+  min-height: 22px;
+  padding: 4px 2px;
   border: none;
   background: transparent;
   color: #111827;
@@ -272,7 +272,7 @@ textarea:focus {
 
 .ef-edit {
   width: 100%;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
@@ -291,7 +291,7 @@ textarea:focus {
 
 textarea.ef-edit {
   resize: vertical;
-  min-height: 80px;
+  min-height: 56px;
 }
 
 .grid {
@@ -307,11 +307,57 @@ textarea.ef-edit {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 10px;
 }
 
 .card:hover {
   border-color: #c7d2fe;
+}
+
+/* ---- 拖拽排序 ---- */
+.grip {
+  cursor: grab;
+  user-select: none;
+  color: var(--muted, #94a3b8);
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.grip:hover {
+  color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.grip:active {
+  cursor: grabbing;
+}
+
+.card-drag-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: stretch;
+}
+
+.card-drag-wrap .card {
+  margin-bottom: 0;
+  height: 100%;
+}
+
+.card-drag-wrap.card-dragging {
+  opacity: 0.4;
+}
+
+.card-drag-wrap.card-drop-before {
+  border-top: 3px solid var(--accent, #6366f1);
+}
+
+.card-drag-wrap.card-drop-after {
+  border-bottom: 3px solid var(--accent, #6366f1);
 }
 
 .muted {

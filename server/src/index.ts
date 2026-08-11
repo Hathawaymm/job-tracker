@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { getCredentials } from './keys.js'
 import { DEFAULT_TASK_CONFIG, batchFindExistingKeys, findPoolJobs, getJobById, getTask, getTaskConfig, recentRuns, setDecision, updateTask } from './db.js'
-import { deleteExperience, insertExperience, listExperiences, updateExperience, buildResumeFromBank } from './db.js'
+import { deleteExperience, insertExperience, listExperiences, reorderExperiences, updateExperience, buildResumeFromBank } from './db.js'
 import { getAppState, setAppState } from './db.js'
 import { fetchJobByUrl, runCrawl, type RunResult } from './crawler.js'
 import { startScheduler } from './scheduler.js'
@@ -400,6 +400,21 @@ app.get('/api/experiences', (req, res) => {
 // SSOT 聚合：经历库 4 类条目 → 完整 Resume（AI 生成简历的数据源）
 app.get('/api/experiences/resume', (_req, res) => {
   res.json({ resume: buildResumeFromBank() })
+})
+
+// 拖拽排序：body { type, ids } 为拖拽后的完整顺序
+app.post('/api/experiences/reorder', (req, res) => {
+  const { type, ids } = (req.body ?? {}) as { type?: string; ids?: unknown }
+  if (!type || !['project', 'work', 'edu', 'profile'].includes(type) || !Array.isArray(ids)) {
+    res.status(400).json({ error: '参数错误：需传入 type 与 ids 数组' })
+    return
+  }
+  const ok = reorderExperiences(type as ExperienceItemInput['type'], ids.filter((x): x is number => typeof x === 'number'))
+  if (!ok) {
+    res.status(400).json({ error: 'ids 必须与当前该类型经历一一对应' })
+    return
+  }
+  res.json({ ok: true })
 })
 
 app.post('/api/experiences', (req, res) => {

@@ -12,6 +12,17 @@ import {
 import { exportResumeDoc, type DocFormat } from '../../lib/exportDoc'
 import { importResumeFile } from '../../lib/resumeImport'
 import EditableField from '../../components/EditableField'
+import { useDragSort } from '../../hooks/useDragSort'
+import { reorderExperiences } from '../../lib/jobsApi'
+
+/** 拖拽把手：仅把手可拖，避免干扰点击编辑 */
+function Grip({ gripProps }: { gripProps: Record<string, unknown> }) {
+  return (
+    <span className="grip" title="拖动排序" {...gripProps}>
+      ⠿
+    </span>
+  )
+}
 
 const TYPE_LABEL: Record<ExperienceType, string> = {
   project: '项目经历',
@@ -21,7 +32,7 @@ const TYPE_LABEL: Record<ExperienceType, string> = {
 }
 
 const EMPTY_FORM: Record<ExperienceType, Record<string, string>> = {
-  project: { company: '', name: '', role: '', period: '', description: '', points: '', tags: '' },
+  project: { company: '', name: '', role: '', description: '', points: '' },
   work: { company: '', name: '', role: '', period: '', highlights: '' },
   edu: { school: '', major: '', degree: '', period: '' },
   profile: { name: '', title: '', city: '', phone: '', email: '', summary: '', skills: '' },
@@ -105,10 +116,8 @@ function formToInput(type: ExperienceType, f: Record<string, string>): Experienc
         company: f.company?.trim() ?? '',
         name: f.name?.trim() ?? '',
         role: f.role?.trim() ?? '',
-        period: f.period?.trim() ?? '',
         description: f.description?.trim() ?? '',
         points: (f.points ?? '').split('\n').map((s) => s.trim()).filter(Boolean),
-        tags: (f.tags ?? '').split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
       }
     case 'work':
       return {
@@ -170,7 +179,6 @@ function AddForm({
           {field('项目名称 *', 'name', '如：订单中心自研重构', 1.4)}
           {field('公司', 'company', '所属公司/单位')}
           {field('担任角色', 'role', '如：项目经理')}
-          {field('时间', 'period', '2024.01 - 2024.12')}
           <div className="field" style={{ flexBasis: '100%' }}>
             <label>项目简介</label>
             <textarea value={value.description ?? ''} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="一句话介绍项目背景与目标" />
@@ -179,7 +187,6 @@ function AddForm({
             <label>项目要点（每行一条，建议含量化结果）</label>
             <textarea value={value.points ?? ''} onChange={(e) => set('points', e.target.value)} rows={3} placeholder="一行一条要点，如：\n· 推动 5 家 KA 客户系统对接上线" />
           </div>
-          {field('标签（逗号分隔，供 AI 匹配用）', 'tags', '如：电商、供应链、EDI、集成')}
         </>
       )}
       {type === 'work' && (
@@ -332,7 +339,6 @@ function ItemCard({
         {field('项目名称', item.name, 'name', '项目名称', 1.4)}
         {field('公司', item.company, 'company', '所属公司', 1)}
         {field('担任角色', item.role, 'role', '如：项目经理', 1)}
-        {field('时间', item.period, 'period', '2024.01 - 2024.12', 1)}
         <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', marginBottom: 12 }}>
           <button className="danger small" onClick={() => onDelete(item)}>删除</button>
         </div>
@@ -355,15 +361,6 @@ function ItemCard({
           disabled={busy}
           placeholder="一行一条要点"
           onChange={(v) => onPatch(item.id, { points: v.split('\n') })}
-        />
-      </div>
-      <div className="field">
-        <label>标签（逗号分隔，供 AI 匹配用）</label>
-        <EditableField
-          value={item.tags.join('、')}
-          disabled={busy}
-          placeholder="如：电商、供应链、EDI、集成"
-          onChange={(v) => onPatch(item.id, { tags: v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) })}
         />
       </div>
     </div>
@@ -530,6 +527,33 @@ export default function ExperienceBankPage() {
   const byType = (t: ExperienceType) => items.filter((x) => x.type === t)
   const profile = byType('profile')[0]
 
+  const workSort = useDragSort<ExperienceItem>({
+    items: byType('work'),
+    onReorder: (next) => void persistReorder('work', next),
+    disabled: busy,
+  })
+  const projSort = useDragSort<ExperienceItem>({
+    items: byType('project'),
+    onReorder: (next) => void persistReorder('project', next),
+    disabled: busy,
+  })
+
+  /** 拖拽重排：本地乐观更新 + server 持久化，失败回滚 */
+  const persistReorder = async (type: ExperienceType, ordered: ExperienceItem[]) => {
+    const targetIdx = items.reduce<number[]>((acc, it, i) => (it.type === type ? [...acc, i] : acc), [])
+    const next = [...items]
+    ordered.forEach((it, k) => {
+      if (targetIdx[k] !== undefined) next[targetIdx[k]] = it
+    })
+    setItems(next)
+    try {
+      await reorderExperiences(type, ordered.map((it) => it.id))
+    } catch (e) {
+      toast(false, e instanceof Error ? e.message : '排序保存失败，已还原')
+      void load()
+    }
+  }
+
   /** 导出个人经历库（经历库聚合为 Resume 结构）为 md/Word/PDF */
   const handleExport = async () => {
     setExporting(true)
@@ -574,24 +598,41 @@ export default function ExperienceBankPage() {
     </div>
   )
 
-  const section = (label: string, type: ExperienceType, hint: string, list: ExperienceItem[]) => (
-    <div className="panel" style={{ marginTop: 12 }}>
-      {sectionHead(label, list.length, type)}
-      <div className="muted small" style={{ marginBottom: 10 }}>{hint}</div>
-      {openForm[type] && (
-        <AddForm
-          type={type}
-          value={form[type]}
-          onChange={(v) => setForm((prev) => ({ ...prev, [type]: v }))}
-          onSave={() => void handleSave(type)}
-          busy={busy}
-        />
-      )}
-      {list.map((item) => (
-        <ItemCard key={item.id} item={item} busy={busy} onPatch={handleInlineUpdate} onDelete={handleDelete} />
-      ))}
-    </div>
-  )
+  const section = (label: string, type: ExperienceType, hint: string, list: ExperienceItem[]) => {
+    const sort = type === 'work' ? workSort : type === 'project' ? projSort : null
+    return (
+      <div className="panel" style={{ marginTop: 12 }}>
+        {sectionHead(label, list.length, type)}
+        <div className="muted small" style={{ marginBottom: 10 }}>{hint}</div>
+        {openForm[type] && (
+          <AddForm
+            type={type}
+            value={form[type]}
+            onChange={(v) => setForm((prev) => ({ ...prev, [type]: v }))}
+            onSave={() => void handleSave(type)}
+            busy={busy}
+          />
+        )}
+        {list.map((item) => {
+          const dragging = !!sort && sort.isDragging(item.id)
+          const indicator = sort ? sort.dropIndicator(item.id) : null
+          const dropClass = indicator === 'before' ? ' card-drop-before' : indicator === 'after' ? ' card-drop-after' : ''
+          return (
+            <div key={item.id} className={`card-drag-wrap${dragging ? ' card-dragging' : ''}${dropClass}`}>
+              <div style={{ flex: 1 }} {...(sort ? sort.cardProps(item) : {})}>
+                <ItemCard item={item} busy={busy} onPatch={handleInlineUpdate} onDelete={handleDelete} />
+              </div>
+              {sort && (
+                <div className="card-grip" style={{ display: 'flex', alignItems: 'center' }}>
+                  <Grip gripProps={sort.gripProps(item)} />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
 
   return (
     <div>

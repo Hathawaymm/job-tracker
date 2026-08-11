@@ -217,6 +217,14 @@ export async function deleteExperience(id: number): Promise<boolean> {
   return data.ok
 }
 
+/** 拖拽排序：ids 为该类型拖拽后的完整 id 顺序 */
+export async function reorderExperiences(type: ExperienceType, ids: number[]): Promise<void> {
+  await request<{ ok: boolean }>('/api/experiences/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ type, ids }),
+  })
+}
+
 /** SSOT 聚合：经历库 4 类条目 → 完整 Resume（AI 生成简历的数据源） */
 export async function getResumeFromBank(): Promise<Resume> {
   const data = await request<{ resume: Resume }>('/api/experiences/resume')

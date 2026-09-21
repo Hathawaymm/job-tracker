@@ -24,6 +24,7 @@ This is not a demo. I use it for my own job search.
 | **AI resume generation** | Generates role-specific resume content from the job description plus your experience bank |
 | **Mock interview** | AI-generated interview questions to support preparation |
 | **Application tracking** | Job database, application list and status tracking |
+| **Runs fully locally** | Backend, database and AI gateway all run on your own machine — no cloud sync, no third-party analytics, no external account |
 
 ## The experience bank — the core idea
 
@@ -76,7 +77,7 @@ In my own use: **15 structured entries** across 11 projects, 2 roles, 1 educatio
 
 **Compliance by design.** Scraping runs with configurable randomised delays between requests and a cap on items per run. There is deliberately **no automated application feature** — the tool assists, it never acts on your behalf beyond what you review manually.
 
-**Security by design.** AI keys are read from local storage only. They are never written into frontend code and never committed to the repository.
+**Security by design.** The backend, database and AI gateway all run locally. Job data, application history and your career record stay on your own machine and are **not shared with any third-party platform** — no cloud sync, no third-party analytics, no external account. Only when you explicitly trigger an AI feature is the necessary text sent to the LLM API you configure yourself (DeepSeek / Zhipu). AI keys are read from local storage only, are never sent to the frontend, and are never committed to the repository.
 
 ## Getting started
 

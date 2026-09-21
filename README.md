@@ -19,10 +19,23 @@ This is not a demo. I use it for my own job search.
 | **Automated job scraping** | A Chrome extension crawls recruitment platforms; the backend schedules tasks and returns results through a queue |
 | **De-duplication** | Every posting is keyed by `platform:job_id` (with a normalised hash fallback) and backed by a database unique index |
 | **AI job matching** | Each posting is scored and ranked; anything below a configurable threshold is filtered out |
-| **Multi-version resumes** | A centralised experience bank lets you compose a tailored resume in seconds, with preview and Word export |
+| **Personal experience bank (SSOT)** | A structured store of every project, role, education entry and personal profile — the single source of truth for all resume output |
+| **Multi-version resumes** | Compose a tailored resume in seconds by selecting from the experience bank, with preview and Word export |
 | **AI resume generation** | Generates role-specific resume content from the job description plus your experience bank |
 | **Mock interview** | AI-generated interview questions to support preparation |
 | **Application tracking** | Job database, application list and status tracking |
+
+## The experience bank — the core idea
+
+The single most useful design decision in this project is that **resumes are derived, not hand-written**.
+
+Instead of maintaining several separate resume documents that drift out of sync, every piece of experience lives once in a structured bank (typed as `project` / `work` / `edu` / `profile`), with drag-to-reorder control over how it reads. Resumes are then **composed** from it — pick the relevant entries, and the tool assembles the document. AI-generated resumes read from exactly the same source.
+
+This means there is one place to update your experience, and every resume, every AI generation, and every export stays consistent with it.
+
+In my own use: **15 structured entries** across 11 projects, 2 roles, 1 education record and 1 profile — supporting every tailored resume I produce.
+
+*(SSOT — single source of truth — is a pattern I care about generally: it is the same principle behind the data governance work I led in enterprise systems, where unifying master data ended the problem of the same entity meaning different things in different systems.)*
 
 ## Architecture
 

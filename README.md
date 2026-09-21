@@ -10,6 +10,8 @@
 
 Job hunting involves a lot of repetitive manual work: reviewing postings one by one, rewriting a resume for every application, and preparing interview answers from scratch each time. I wanted to know whether AI could genuinely remove that friction — so instead of waiting for a tool to exist, I built one.
 
+Built in roughly **two weeks**, including debugging, testing and tuning how the tool filters roles.
+
 This is not a demo. I use it for my own job search.
 
 ## Features
@@ -37,6 +39,12 @@ This means there is one place to update your experience, and every resume, every
 In my own use: **15 structured entries** across 11 projects, 2 roles, 1 education record and 1 profile — supporting every tailored resume I produce.
 
 *(SSOT — single source of truth — is a pattern I care about generally: it is the same principle behind the data governance work I led in enterprise systems, where unifying master data ended the problem of the same entity meaning different things in different systems.)*
+
+## Product decisions
+
+**Why matching has to be explainable.** A bare match score is not something I would act on. Every result therefore comes with **a reason** — why this role fits my background — rather than a number on its own. If the tool cannot explain its judgement, I do not trust it enough to use it.
+
+**Why there is no auto-apply button.** Automated applications would have been straightforward to build. I chose not to. Applying for a job is **a person-to-person act** — mass-applying wastes a recruiter's time and treats every company the same. Out of respect for each one, I tailor every application, and the tool helps by pulling the experience from my bank that fits that role. **The tool handles filtering and ranking; the decision to apply stays with me.**
 
 ## Architecture
 
